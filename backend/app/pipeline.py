@@ -1,6 +1,5 @@
 """The search pipeline: PubMed → dedupe → enrich → LLM triage → ranked deck.
 
-Also the monthly crawl (forward window + one backfill step per saved search).
 """
 
 import asyncio
@@ -16,7 +15,7 @@ from . import llm, prompts
 from . import settings_store as st
 from .db import session
 from .enrich import enrich_papers
-from .models import CrawlLog, Paper, Search, SearchResult, Triage, utcnow
+from .models import Paper, Search, SearchResult, Triage, utcnow
 from .pubmed import esearch, efetch_page, normalise_doi
 
 log = logging.getLogger("sift.pipeline")
@@ -217,32 +216,18 @@ def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], in
     return linked, new_count, pmcids
 
 
-async def run_pipeline(
-    search_id: int,
-    window_from: str | None = None,
-    window_to: str | None = None,
-    update_stage: bool = True,
-) -> dict:
-    """Run search→fetch→dedupe→enrich→triage→rank for one search.
-
-    With window_from/window_to set (crawler), the search's own dates are ignored
-    and the UI stage is left alone unless update_stage is True.
-    """
+async def run_pipeline(search_id: int) -> dict:
+    """Run search→fetch→dedupe→enrich→triage→rank for one search."""
     if search_id in RUNNING:
         raise RuntimeError("already running")
     RUNNING.add(search_id)
     try:
-        return await _run_pipeline_inner(search_id, window_from, window_to, update_stage)
+        return await _run_pipeline_inner(search_id)
     finally:
         RUNNING.discard(search_id)
 
 
-async def _run_pipeline_inner(
-    search_id: int,
-    window_from: str | None,
-    window_to: str | None,
-    update_stage: bool,
-) -> dict:
+async def _run_pipeline_inner(search_id: int) -> dict:
     with session() as s:
         search = s.get(Search, search_id)
         if search is None:
@@ -254,12 +239,11 @@ async def _run_pipeline_inner(
     term = search.translated_query
     if search.pdf_only:
         term = f"({term}) AND free full text[sb]"
-    date_from = window_from if (window_from or window_to) else search.date_from
-    date_to = window_to if (window_from or window_to) else search.date_to
+    date_from = search.date_from
+    date_to = search.date_to
 
-    if update_stage:
-        set_stage(search_id, "searching", found=None, fetched=0, no_abstract=0,
-                  new_papers=0, to_screen=0, screened=0, passed=None, error=None)
+    set_stage(search_id, "searching", found=None, fetched=0, no_abstract=0,
+              new_papers=0, to_screen=0, screened=0, passed=None, error=None)
 
     stats = {"found": 0, "fetched": 0, "no_abstract": 0, "new_papers": 0}
 
@@ -267,8 +251,7 @@ async def _run_pipeline_inner(
         async with httpx.AsyncClient(timeout=30) as client:
             count, webenv, qk = await esearch(client, term, date_from, date_to)
             stats["found"] = count
-            if update_stage:
-                set_stage(search_id, found=count)
+            set_stage(search_id, found=count)
 
             records: list[dict] = []
             fetched = 0
@@ -278,14 +261,12 @@ async def _run_pipeline_inner(
                 with_abstract = [r for r in page if r["abstract"]]
                 stats["no_abstract"] += len(page) - len(with_abstract)
                 records.extend(with_abstract)
-                if update_stage:
-                    set_stage(search_id, fetched=fetched, no_abstract=stats["no_abstract"])
+                set_stage(search_id, fetched=fetched, no_abstract=stats["no_abstract"])
             stats["fetched"] = fetched
 
         linked, new_count, pmcids = _dedupe_and_link(records, search_id)
         stats["new_papers"] = new_count
-        if update_stage:
-            set_stage(search_id, new_papers=new_count)
+        set_stage(search_id, new_papers=new_count)
 
         await enrich_papers(linked, pmcids)
 
@@ -297,8 +278,7 @@ async def _run_pipeline_inner(
                 ).all()
             } if linked else set()
             todo = [s.get(Paper, pid) for pid in linked if pid not in done]
-        if update_stage:
-            set_stage(search_id, "screening", to_screen=len(todo), screened=0)
+        set_stage(search_id, "screening", to_screen=len(todo), screened=0)
 
         if todo:
             try:
@@ -321,32 +301,17 @@ async def _run_pipeline_inner(
                         log.warning("triage failed for paper %s: %s", paper.id, e)
                         save_triage_error(paper.id, str(e), model_name)
                     screened += 1
-                    if update_stage:
-                        set_stage(search_id, screened=screened)
+                    set_stage(search_id, screened=screened)
 
             await asyncio.gather(*(one(p) for p in todo))
 
         deck_size = rank_search(search_id)
-        if update_stage:
-            set_stage(search_id, "ready", passed=deck_size)
-
-        # first successful run seeds the backfill cursor
-        with session() as s:
-            search = s.get(Search, search_id)
-            if search and not search.backfill_cursor and not window_from:
-                cursor = search.date_from
-                if not cursor:
-                    years = [r["year"] for r in records if r.get("year")]
-                    cursor = f"{min(years):04d}-01-01" if years else date.today().isoformat()
-                search.backfill_cursor = cursor
-                s.add(search)
-                s.commit()
+        set_stage(search_id, "ready", passed=deck_size)
 
         return stats
     except Exception as e:
         log.exception("pipeline failed for search %s", search_id)
-        if update_stage:
-            set_stage(search_id, "error", error=str(e)[:500])
+        set_stage(search_id, "error", error=str(e)[:500])
         raise
 
 
@@ -358,92 +323,3 @@ def start_pipeline_task(search_id: int) -> None:
             pass  # already logged and staged
 
     asyncio.get_running_loop().create_task(runner())
-
-
-# ── monthly crawl ────────────────────────────────────────────
-
-
-def _months_back(d: date, months: int) -> date:
-    y, m = d.year, d.month - months
-    while m < 1:
-        m += 12
-        y -= 1
-    return date(y, m, min(d.day, 28))
-
-
-def _log_crawl(search_id: int, wfrom: str, wto: str, stats: dict | None, error: str | None) -> None:
-    with session() as s:
-        s.add(
-            CrawlLog(
-                search_id=search_id,
-                window_from=wfrom,
-                window_to=wto,
-                found=(stats or {}).get("found"),
-                new_papers=(stats or {}).get("new_papers"),
-                ran_at=utcnow(),
-                status="error" if error else "ok",
-                error=error,
-            )
-        )
-        s.commit()
-
-
-async def crawl_search(search: Search) -> None:
-    today = date.today().isoformat()
-
-    # forward: last successful window_to (or creation date) → today
-    with session() as s:
-        last_to = s.exec(
-            select(CrawlLog.window_to)
-            .where(CrawlLog.search_id == search.id, CrawlLog.status == "ok")
-            .order_by(CrawlLog.window_to.desc())  # type: ignore[union-attr]
-            .limit(1)
-        ).first()
-    wfrom = last_to or search.created_at[:10]
-    try:
-        stats = await run_pipeline(search.id, window_from=wfrom, window_to=today, update_stage=False)
-        _log_crawl(search.id, wfrom, today, stats, None)
-    except Exception as e:
-        _log_crawl(search.id, wfrom, today, None, str(e)[:500])
-        return
-
-    # backward: one backfill window further into the past
-    floor = date(st.get_int("backfill_floor_year", 2000), 1, 1)
-    window_months = st.get_int("backfill_window_months", 12)
-    with session() as s:
-        fresh = s.get(Search, search.id)
-        cursor_str = fresh.backfill_cursor if fresh else None
-    if not cursor_str:
-        return
-    cursor = date.fromisoformat(cursor_str[:10])
-    if cursor <= floor:
-        return
-    new_from = max(_months_back(cursor, window_months), floor)
-    try:
-        stats = await run_pipeline(
-            search.id, window_from=new_from.isoformat(), window_to=cursor.isoformat(), update_stage=False
-        )
-        _log_crawl(search.id, new_from.isoformat(), cursor.isoformat(), stats, None)
-        with session() as s:
-            fresh = s.get(Search, search.id)
-            if fresh:
-                fresh.backfill_cursor = new_from.isoformat()
-                s.add(fresh)
-                s.commit()
-    except Exception as e:
-        _log_crawl(search.id, new_from.isoformat(), cursor.isoformat(), None, str(e)[:500])
-
-
-async def monthly_crawl() -> dict:
-    log.info("monthly crawl starting")
-    with session() as s:
-        saved = s.exec(select(Search).where(Search.is_saved == 1)).all()
-    ran = 0
-    for search in saved:
-        if search.id in RUNNING:
-            log.info("skipping search %s — pipeline already running", search.id)
-            continue
-        await crawl_search(search)
-        ran += 1
-    log.info("monthly crawl done: %d searches", ran)
-    return {"searches_crawled": ran}

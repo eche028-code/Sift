@@ -22,7 +22,6 @@ class Search(SQLModel, table=True):
     date_to: str | None = None
     pdf_only: int = 0
     is_saved: int = 0
-    backfill_cursor: str | None = None
     stage: str = "new"  # new|translating|searching|screening|ready|error
     stage_detail: str | None = None  # JSON
     created_at: str = Field(default_factory=utcnow)
@@ -83,14 +82,3 @@ class Note(SQLModel, table=True):
     created_at: str = Field(default_factory=utcnow)
 
 
-class CrawlLog(SQLModel, table=True):
-    __tablename__ = "crawl_log"
-    id: int | None = Field(default=None, primary_key=True)
-    search_id: int | None = None
-    window_from: str | None = None
-    window_to: str | None = None
-    found: int | None = None
-    new_papers: int | None = None
-    ran_at: str | None = None
-    status: str | None = None  # ok|error
-    error: str | None = None

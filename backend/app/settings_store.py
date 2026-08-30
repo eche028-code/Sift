@@ -6,11 +6,7 @@ from .db import session
 from .models import Setting
 
 DEFAULTS: dict[str, str] = {
-    "ncbi_api_key": "",
     "contact_email": "",
-    "backfill_floor_year": "2000",
-    "crawl_day": "1",
-    "backfill_window_months": "12",
     "record_cap": "200",
     "user_profile": (
         "An optometrist focused on myopia control, orthokeratology, "

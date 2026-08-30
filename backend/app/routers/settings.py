@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from .. import prompts, scheduler
+from .. import prompts
 from .. import settings_store as st
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -18,8 +18,6 @@ def put_settings(body: dict) -> dict:
         if key not in st.DEFAULTS:
             raise HTTPException(400, f"unknown setting: {key}")
         st.set(key, "" if value is None else str(value))
-    if "crawl_day" in body:
-        scheduler.schedule_monthly()
     return st.all_settings()
 
 

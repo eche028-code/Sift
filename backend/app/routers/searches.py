@@ -6,7 +6,7 @@ from sqlmodel import func, select
 
 from .. import llm, prompts
 from ..db import session
-from ..models import CrawlLog, Note, Paper, Search, SearchResult, Triage
+from ..models import Note, Paper, Search, SearchResult, Triage
 from ..pipeline import RUNNING, start_pipeline_task
 from ..synthesis import synthesise as run_synthesis
 
@@ -186,8 +186,6 @@ def delete_search(search_id: int) -> dict:
         for note in s.exec(select(Note).where(Note.search_id == search_id)).all():
             note.search_id = None  # keep the note, orphan it
             s.add(note)
-        for row in s.exec(select(CrawlLog).where(CrawlLog.search_id == search_id)).all():
-            s.delete(row)
         s.delete(search)
         s.commit()
     return {"deleted": search_id}

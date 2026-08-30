@@ -49,18 +49,14 @@ export default function Settings({ go }) {
   const [test, setTest] = useState(null);
   const [models, setModels] = useState(null);
   const [saved, setSaved] = useState(false);
-  const [crawlMsg, setCrawlMsg] = useState("");
-  const [log, setLog] = useState([]);
 
   const load = async () => {
-    const [s, d, l] = await Promise.all([
+    const [s, d] = await Promise.all([
       api.getSettings().catch(() => null),
       api.promptDefaults().catch(() => ({})),
-      api.crawlLog().catch(() => []),
     ]);
     setSettings(s);
     setDefaults(d);
-    setLog(l);
   };
   useEffect(() => { load(); }, []);
 
@@ -86,11 +82,7 @@ export default function Settings({ go }) {
       prompt_translator: settings.prompt_translator,
       prompt_triage: settings.prompt_triage,
       prompt_synthesis: settings.prompt_synthesis,
-      ncbi_api_key: settings.ncbi_api_key,
       contact_email: settings.contact_email,
-      backfill_floor_year: settings.backfill_floor_year,
-      crawl_day: settings.crawl_day,
-      backfill_window_months: settings.backfill_window_months,
       user_profile: settings.user_profile,
     };
     if (apiKey.trim()) body.llm_api_key = apiKey.trim(); // omitted → server keeps the stored key
@@ -117,12 +109,6 @@ export default function Settings({ go }) {
   const fetchModels = async () => {
     setModels({ busy: true });
     setModels(await api.llmModels(draft()).catch((e) => ({ ok: false, error: e.message, models: [] })));
-  };
-
-  const runCrawl = async () => {
-    setCrawlMsg("starting…");
-    const r = await api.runCrawl().catch((e) => ({ started: false, reason: e.message }));
-    setCrawlMsg(r.started ? "crawl running — check the log below in a minute" : r.reason);
   };
 
   if (!settings) {
@@ -306,34 +292,16 @@ export default function Settings({ go }) {
           </div>
 
           <div className="flex flex-col gap-8 lg:w-1/2 lg:min-w-0">
-            {/* ── pubmed & crawl ── */}
+            {/* ── pubmed ── */}
             <section className="flex flex-col gap-4">
-              <Label>PubMed &amp; crawl</Label>
-              <div>
-                <p className="text-xs text-slate-500 mb-1.5">
-                  NCBI API key — optional; PubMed works without one, this only raises the rate limit
-                </p>
-                <input className={inputCls} value={settings.ncbi_api_key} onChange={set("ncbi_api_key")}
-                  autoCapitalize="none" spellCheck={false} placeholder="none" />
-              </div>
+              <Label>PubMed</Label>
+              <p className="text-xs text-slate-600 -mt-2">
+                PubMed needs no account or key. Searches run against the public E-utilities API.
+              </p>
               <div>
                 <p className="text-xs text-slate-500 mb-1.5">Contact email — needed for Unpaywall PDF lookup</p>
                 <input className={inputCls} value={settings.contact_email} onChange={set("contact_email")}
                   type="email" autoCapitalize="none" placeholder="you@example.com" />
-              </div>
-              <div className="grid grid-cols-3 gap-2 lg:gap-3">
-                <div>
-                  <p className="text-xs text-slate-500 mb-1.5">Backfill floor</p>
-                  <input className={inputCls} value={settings.backfill_floor_year} onChange={set("backfill_floor_year")} inputMode="numeric" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-1.5">Crawl day</p>
-                  <input className={inputCls} value={settings.crawl_day} onChange={set("crawl_day")} inputMode="numeric" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-1.5">Window (mo)</p>
-                  <input className={inputCls} value={settings.backfill_window_months} onChange={set("backfill_window_months")} inputMode="numeric" />
-                </div>
               </div>
               <div>
                 <p className="text-xs text-slate-500 mb-1.5">Reader profile — steers triage and synthesis</p>
@@ -341,35 +309,6 @@ export default function Settings({ go }) {
               </div>
             </section>
 
-
-            {/* ── crawl now + log ── */}
-            <section>
-              <Label>Monthly crawl</Label>
-              <p className="text-xs text-slate-500 mt-1.5">
-                Only watched topics are crawled. One-off searches need nothing here.
-              </p>
-              <button
-                onClick={runCrawl}
-                className="mt-2 w-full rounded-xl border border-slate-700 text-slate-300 py-3 inline-flex items-center justify-center gap-2 hover:bg-slate-900"
-              >
-                <RefreshCw size={15} /> Run crawl now
-              </button>
-              {crawlMsg && <p className="font-mono text-xs text-slate-500 mt-2">{crawlMsg}</p>}
-              {log.length > 0 && (
-                <div className="mt-3 flex flex-col gap-1.5">
-                  {log.slice(0, 6).map((row) => (
-                    <p key={row.id} className="font-mono text-xs text-slate-600">
-                      {row.ran_at?.slice(0, 10)} · {row.window_from} → {row.window_to} ·{" "}
-                      {row.status === "ok" ? (
-                        <span className="text-slate-500">{row.found} found, {row.new_papers} new</span>
-                      ) : (
-                        <span className="text-rose-400">error</span>
-                      )}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </section>
           </div>
         </div>
 

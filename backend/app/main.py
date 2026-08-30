@@ -9,10 +9,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import select
 
-from . import scheduler
 from .db import BASE_DIR, DATA_DIR, init_db, session
 from .models import Search
-from .routers import crawl, llm_config, notes, results, searches, settings
+from .routers import llm_config, notes, results, searches, settings
 
 log = logging.getLogger("sift")
 
@@ -52,10 +51,8 @@ async def lifespan(app: FastAPI):
     setup_logging()
     init_db()
     reset_interrupted_searches()
-    scheduler.start()
     log.info("sift up — data dir %s", DATA_DIR)
     yield
-    scheduler.shutdown()
 
 
 app = FastAPI(title="Sift", lifespan=lifespan)
@@ -65,7 +62,6 @@ app.include_router(results.router)
 app.include_router(notes.router)
 app.include_router(llm_config.router)
 app.include_router(settings.router)
-app.include_router(crawl.router)
 
 DIST = BASE_DIR / "frontend" / "dist"
 if DIST.exists():

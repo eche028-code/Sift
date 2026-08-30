@@ -41,7 +41,7 @@ const Row = ({ row, onOpen, onToggleSave, onDelete }) => (
       <button
         onClick={(e) => { e.stopPropagation(); onToggleSave(); }}
         className={`p-1.5 ${row.is_saved ? "text-teal-400" : "text-slate-600"} active:text-teal-300`}
-        aria-label={row.is_saved ? "Stop watching" : "Watch monthly"}
+        aria-label={row.is_saved ? "Remove from kept topics" : "Keep this topic"}
       >
         {row.is_saved ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
       </button>
@@ -126,7 +126,7 @@ export default function Topics({ go }) {
             {saved.length > 0 && (
               <div>
                 <p className="font-mono text-xs uppercase tracking-wide text-slate-500 mb-2">
-                  Watched topics
+                  Kept topics
                 </p>
                 <div className="flex flex-col gap-3">
                   {saved.map((row) => (

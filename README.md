@@ -1,6 +1,6 @@
 # Sift
 
-Personal literature-triage app: natural-language search → LLM-translated PubMed query → AI-screened swipe cards → pool → synthesised evidence notes. Single user, one process, SQLite. Accessed from an iPhone over Tailscale as an installable PWA.
+Personal literature-triage app: natural-language search → LLM-translated PubMed query → AI-screened swipe cards → pool → synthesised evidence notes. On-demand only — you run a search when you want one. Single user, one process, SQLite. Accessed from an iPhone over Tailscale as an installable PWA.
 
 Built to `docs/sift-build-spec.md`; the UX is a port of `docs/sift-simulator.jsx`.
 
@@ -11,7 +11,7 @@ iPhone PWA ── https://<machine>.<tailnet>.ts.net:8443 (tailscale serve)
                 │
         SQLite  data/sift.db  (WAL)
                 │
-        PubMed E-utilities · Crossref · Unpaywall · your LLM endpoints
+        PubMed E-utilities (no key) · Crossref · Unpaywall · your LLM endpoint
 ```
 
 ## Run it
@@ -30,9 +30,8 @@ First-time setup happens in the app, under **Settings** (gear icon):
 2. **Paste the API key and name the model.** One model runs all three functions
    (translator, triage, synthesis). **Test** pings it for latency; **Fetch models** lists
    what the endpoint actually offers, so you do not have to guess a model ID.
-3. **PubMed & crawl** — put in your contact email (required for Unpaywall PDF lookup), and
-   ideally a free [NCBI API key](https://www.ncbi.nlm.nih.gov/account/settings/) (raises the
-   rate limit from 3 to 10 req/s).
+3. **Contact email** — required for Unpaywall PDF lookup. PubMed itself needs no account,
+   key or registration; searches go to the public E-utilities API at ~3 req/s.
 4. **Instructions** (optional) — per-function steering for translator, triage and synthesis.
    Blank uses the built-in wording. The JSON reply contract is appended automatically and is
    not editable, because the pipeline parses those keys.
@@ -73,7 +72,9 @@ schtasks /Create /TN "Sift" /TR "\"C:\Sift\start_sift.bat\"" /SC ONLOGON /RL LIM
 
 The triage prompt includes your 20 most recent kept and 20 most recent skipped papers as few-shot steering — the deck adapts to how you swipe, no training involved.
 
-**Watched topics** (bookmark toggle) get a monthly crawl (day-of-month in Settings): a forward window since the last crawl, plus one backfill window (default 12 months) further into the past, until the floor year (default 2000). New relevant papers land as pending cards, shown as a badge on the home screen. `Run crawl now` in Settings triggers it manually.
+The bookmark toggle just keeps a search on the home screen under **Kept topics**; it does not
+schedule anything. To pick up newer papers, run the search again — anything already triaged is
+never re-screened, so a re-run only costs tokens on genuinely new abstracts.
 
 ## Development
 
@@ -94,4 +95,4 @@ cd frontend && npm run build
 
 ## Not here yet
 
-Phase 2 "explore" deck (LLM proposes adjacent queries, `source='explore'`). Non-goals per spec: auth, multi-user, cloud, native app, Scholar scraping, trained ranking.
+Phase 2 "explore" deck (LLM proposes adjacent queries, `source='explore'`). The scheduled monthly crawl and backfill were built and then removed — this is an on-demand tool. Non-goals per spec: auth, multi-user, cloud, native app, Scholar scraping, trained ranking.

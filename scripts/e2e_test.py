@@ -30,7 +30,7 @@ def check(name: str, cond: bool, extra: str = ""):
 def main() -> int:
     # settings roundtrip
     r = c.get("/api/settings")
-    check("GET /api/settings", r.status_code == 200 and "backfill_floor_year" in r.json())
+    check("GET /api/settings", r.status_code == 200 and "record_cap" in r.json())
 
     # search without a translator configured → 409
     r = c.post("/api/searches", json={"raw_query": "test"})
@@ -66,7 +66,7 @@ def main() -> int:
     sid = r.json()["id"]
     check("rationale captured", bool(r.json()["stage_detail"].get("rationale")))
 
-    # patch filters: last 1 year, watched
+    # patch filters: last 1 year, kept
     import datetime
     date_from = (datetime.date.today() - datetime.timedelta(days=365)).isoformat()
     r = c.patch(f"/api/searches/{sid}", json={"date_from": date_from, "pdf_only": False, "is_saved": True})
@@ -133,7 +133,6 @@ def main() -> int:
     # search list with counts (topics screen)
     r = c.get("/api/searches")
     row = next(x for x in r.json() if x["id"] == sid)
-    check("backfill cursor seeded", bool(c.get(f"/api/searches/{sid}").json().get("date_from")))
     check("topics counts", row["counts"]["kept"] == 2 and row["counts"]["pending"] > 0, str(row["counts"]))
 
     # frontend served?

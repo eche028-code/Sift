@@ -128,12 +128,12 @@ export default function Filters({ go, search: initial, searchId }) {
 
         <Toggle on={watch} onClick={() => setWatch((v) => !v)}
           icon={<Bookmark size={16} className="text-slate-500" />}>
-          Watch this topic — monthly updates
+          Keep this topic on the home screen
         </Toggle>
 
         <p className="font-mono text-xs text-slate-500">
-          First run fetches up to 200 records, newest first. Watched topics keep crawling
-          forward monthly and backfill older years.
+          Fetches up to 200 records, newest first. Run the search again whenever you want
+          newer papers — anything already triaged is never re-screened.
         </p>
 
         {error && <ErrorBox error={error} />}

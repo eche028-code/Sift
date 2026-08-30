@@ -21,15 +21,13 @@ MONTHS = {
 
 def _common_params() -> dict:
     p = {"tool": "sift", "db": "pubmed"}
-    if key := st.get("ncbi_api_key"):
-        p["api_key"] = key
     if email := st.get("contact_email"):
         p["email"] = email
     return p
 
 
 async def _get(client: httpx.AsyncClient, url: str, params: dict) -> httpx.Response:
-    delay = 0.12 if st.get("ncbi_api_key") else 0.35  # stay under the E-utilities rate limit
+    delay = 0.35  # keyless E-utilities allows ~3 req/s
     for attempt in range(3):
         await asyncio.sleep(delay)
         try:

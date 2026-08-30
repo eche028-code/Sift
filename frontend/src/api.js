@@ -119,8 +119,6 @@ export const api = {
   testLlm: (cfg) => req("POST", "/api/llm/test", cfg || {}),
   llmModels: (cfg) => req("POST", "/api/llm/models", cfg || {}),
   promptDefaults: () => req("GET", "/api/settings/prompt-defaults"),
-  runCrawl: () => req("POST", "/api/crawl/run"),
-  crawlLog: () => req("GET", "/api/crawl/log"),
   getSettings: () => req("GET", "/api/settings"),
   putSettings: (fields) => req("PUT", "/api/settings", fields),
 };
