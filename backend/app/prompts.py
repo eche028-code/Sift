@@ -4,13 +4,39 @@ import json
 
 from . import settings_store as st
 
-TRANSLATOR_SYSTEM = """You convert a clinician's natural-language question into a single PubMed search query.
-
-Rules:
-- Group synonyms with OR inside parentheses; combine distinct concepts with AND.
+# Each function's steering is editable in Settings; the JSON contract below it is not,
+# because the pipeline parses those keys.
+DEFAULT_TRANSLATOR = """- Group synonyms with OR inside parentheses; combine distinct concepts with AND.
 - Use field tags where they help: [MeSH Terms], [tiab]. Prefer recall over precision — downstream AI screening removes noise.
-- Do NOT add date restrictions or availability filters (free full text, language); those are applied separately.
-- Reply with JSON only, no prose: {"pubmed_query": "...", "rationale": "one short sentence on how you interpreted the question"}"""
+- Do NOT add date restrictions or availability filters (free full text, language); those are applied separately."""
+
+DEFAULT_TRIAGE = """Score 0-100 for evidence quality: study design first (meta-analysis and RCT high; prospective cohort middle; retrospective and cross-sectional lower; case series and surveys low), then sample size, follow-up length, masking, and registration or pre-specification of outcomes."""
+
+DEFAULT_SYNTHESIS = """- One opening sentence with the counts you are given (screened / passed triage / kept).
+- "## Findings" — one bullet per paper: **FirstAuthor et al. (Year, Design, n=N)** — the key finding, one sentence. End the bullet with the grade in italics, e.g. *[Strong]*.
+- "## Where the evidence is thin" — one short paragraph on recurring limitations and open questions across these papers.
+- "## Clinical takeaway" — two or three sentences, practical and specific, cautious where the evidence is weak."""
+
+DEFAULT_PROMPTS = {
+    "translator": DEFAULT_TRANSLATOR,
+    "triage": DEFAULT_TRIAGE,
+    "synthesis": DEFAULT_SYNTHESIS,
+}
+
+
+def steer(role: str) -> str:
+    """The reader's own instructions for a function, or the built-in ones."""
+    return st.get(f"prompt_{role}").strip() or DEFAULT_PROMPTS[role]
+
+
+def translator_system() -> str:
+    return "\n".join([
+        "You convert a clinician's natural-language question into a single PubMed search query.",
+        "",
+        "Rules:",
+        steer("translator"),
+        '- Reply with JSON only, no prose: {"pubmed_query": "...", "rationale": "one short sentence on how you interpreted the question"}',
+    ])
 
 
 def triage_system(raw_query: str, translated_query: str | None, feedback_block: str) -> str:
@@ -31,10 +57,7 @@ def triage_system(raw_query: str, translated_query: str | None, feedback_block: 
         parts += ["", feedback_block]
     parts += [
         "",
-        "Score 0-100 for evidence quality: study design first (meta-analysis and RCT high; "
-        "prospective cohort middle; retrospective and cross-sectional lower; case series and "
-        "surveys low), then sample size, follow-up length, masking, and registration or "
-        "pre-specification of outcomes.",
+        steer("triage"),
         "",
         "Reply with JSON only, exactly these keys:",
         '{"relevant": true, "finding": "one sentence, the single most decision-useful result", '
@@ -80,10 +103,7 @@ def synthesis_system(raw_query: str) -> str:
 The reader screened the literature for: "{raw_query}" and kept the papers given below.
 
 Write a markdown note with exactly this structure:
-- One opening sentence with the counts you are given (screened / passed triage / kept).
-- "## Findings" — one bullet per paper: **FirstAuthor et al. (Year, Design, n=N)** — the key finding, one sentence. End the bullet with the grade in italics, e.g. *[Strong]*.
-- "## Where the evidence is thin" — one short paragraph on recurring limitations and open questions across these papers.
-- "## Clinical takeaway" — two or three sentences, practical and specific, cautious where the evidence is weak.
+{steer("synthesis")}
 
 No preamble, no code fences, markdown only. Do not invent papers or numbers."""
 

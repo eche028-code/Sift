@@ -6,8 +6,6 @@ import time
 from openai import AsyncOpenAI, BadRequestError
 
 from . import settings_store as st
-from .db import session
-from .models import Provider
 
 
 class LLMNotConfigured(Exception):
@@ -33,20 +31,16 @@ def _client(base_url: str, api_key: str) -> AsyncOpenAI:
     return _clients[key]
 
 
-def resolve_role(role: str) -> tuple[Provider, str]:
-    cfg = st.get_json(f"role.{role}")
-    if not cfg or not cfg.get("provider_id") or not cfg.get("model"):
+def resolve_model() -> tuple[str, str, str, str]:
+    """(label, base_url, api_key, model) for the one configured endpoint."""
+    base_url = st.get("llm_base_url").strip()
+    model = st.get("llm_model").strip()
+    if not base_url or not model:
         raise LLMNotConfigured(
-            f"No model assigned to the '{role}' role. Open Settings and assign one."
+            "No model configured. Open Settings, pick a provider, and enter an API key and model."
         )
-    with session() as s:
-        provider = s.get(Provider, cfg["provider_id"])
-    if provider is None:
-        raise LLMNotConfigured(
-            f"The provider assigned to the '{role}' role no longer exists. "
-            "Open Settings and reassign it."
-        )
-    return provider, cfg["model"]
+    label = st.get("llm_provider").strip() or base_url
+    return label, base_url, st.get("llm_api_key").strip(), model
 
 
 async def chat(
@@ -57,9 +51,9 @@ async def chat(
     temperature: float | None = 0.2,
     force_json: bool = True,
 ) -> str:
-    """Chat with the model assigned to `role`. Strips params a provider rejects."""
-    provider, model = resolve_role(role)
-    client = _client(provider.base_url, provider.api_key)
+    """Chat with the configured model. `role` only labels errors. Strips params a provider rejects."""
+    label, base_url, api_key, model = resolve_model()
+    client = _client(base_url, api_key)
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -83,8 +77,8 @@ async def chat(
         except BadRequestError as e:
             last_err = e  # provider rejected a param — try a plainer request
         except Exception as e:
-            raise LLMError(f"{provider.name} ({model}): {e}") from e
-    raise LLMError(f"{provider.name} ({model}): {last_err}") from last_err
+            raise LLMError(f"{label} ({model}) during {role}: {e}") from e
+    raise LLMError(f"{label} ({model}) during {role}: {last_err}") from last_err
 
 
 def extract_json(text: str) -> dict:
@@ -125,9 +119,9 @@ def extract_json(text: str) -> dict:
     raise ValueError("no JSON object found in model reply")
 
 
-async def test_provider(provider: Provider, model: str) -> dict:
+async def test_connection(base_url: str, api_key: str, model: str) -> dict:
     """1-token-ish ping; returns latency or a readable error."""
-    client = _client(provider.base_url, provider.api_key)
+    client = _client(base_url, api_key)
     t0 = time.monotonic()
     try:
         resp = await client.chat.completions.create(
@@ -141,7 +135,7 @@ async def test_provider(provider: Provider, model: str) -> dict:
         return {"ok": False, "model": model, "error": str(e)[:300]}
 
 
-async def list_models(provider: Provider) -> list[str]:
-    client = _client(provider.base_url, provider.api_key)
+async def list_models(base_url: str, api_key: str) -> list[str]:
+    client = _client(base_url, api_key)
     page = await client.models.list()
     return [m.id for m in page.data]

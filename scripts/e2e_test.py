@@ -1,17 +1,21 @@
 """End-to-end pipeline test against a running server (port 8000) + mock LLM (port 9099).
 
-Exercises: provider CRUD, role assignment, translate, real PubMed search/fetch,
+Exercises: model config, per-function instructions, translate, real PubMed search/fetch,
 dedupe, enrich, mock triage, ranking, deck, decisions, undo, pool, synthesis, notes.
+
+It writes to whatever database the target server uses, so point it at a scratch
+instance rather than your own: set SIFT_DATA_DIR for that server, and SIFT_TEST_BASE here.
 
 Run:  venv/Scripts/python.exe scripts/e2e_test.py
 """
 
+import os
 import sys
 import time
 
 import httpx
 
-BASE = "http://127.0.0.1:8000"
+BASE = os.environ.get("SIFT_TEST_BASE", "http://127.0.0.1:8000")
 c = httpx.Client(base_url=BASE, timeout=120)
 failures = []
 
@@ -32,21 +36,29 @@ def main() -> int:
     r = c.post("/api/searches", json={"raw_query": "test"})
     check("create search without models → 409", r.status_code == 409, r.json().get("detail", "")[:60])
 
-    # provider CRUD
-    r = c.post("/api/providers", json={"name": "Mock", "base_url": "http://127.0.0.1:9099/v1", "api_key": "test-key-1234"})
-    check("POST /api/providers", r.status_code == 200)
-    pid = r.json()["id"]
-    r = c.get("/api/providers")
+    # point the one model at the mock
+    r = c.put("/api/settings", json={
+        "llm_provider": "Custom",
+        "llm_base_url": "http://127.0.0.1:9099/v1",
+        "llm_api_key": "test-key-1234",
+        "llm_model": "mock-1",
+    })
+    check("configure model", r.status_code == 200 and r.json()["llm_model"] == "mock-1")
     body = r.json()
-    check("provider key masked", body[0].get("key_last4") == "1234" and "api_key" not in body[0])
+    check("api key masked", body.get("llm_api_key_set") is True
+          and body.get("llm_api_key_last4") == "1234" and "llm_api_key" not in body)
 
-    # provider test ping (no role assigned yet → falls back to /v1/models listing)
-    r = c.post(f"/api/providers/{pid}/test", json={})
-    check("provider test ping", r.status_code == 200 and r.json().get("ok") is True, str(r.json()))
+    # connection ping against the saved config
+    r = c.post("/api/llm/test", json={})
+    check("llm test ping", r.status_code == 200 and r.json().get("ok") is True, str(r.json()))
 
-    # role assignment
-    r = c.put("/api/settings", json={"roles": {role: {"provider_id": pid, "model": "mock-1"} for role in ("translator", "triage", "synthesis")}})
-    check("assign roles", r.status_code == 200 and r.json()["roles"]["triage"]["model"] == "mock-1")
+    # editable per-function instructions
+    r = c.get("/api/settings/prompt-defaults")
+    check("prompt defaults", r.status_code == 200 and set(r.json()) == {"translator", "triage", "synthesis"})
+    r = c.put("/api/settings", json={"prompt_triage": "Favour randomised trials."})
+    check("custom instruction saved", r.json()["prompt_triage"] == "Favour randomised trials.")
+    r = c.put("/api/settings", json={"prompt_triage": ""})
+    check("instruction reset to default", r.json()["prompt_triage"] == "")
 
     # create search → translation via mock
     r = c.post("/api/searches", json={"raw_query": "Does orthokeratology slow axial elongation in children?"})
@@ -121,8 +133,8 @@ def main() -> int:
     # search list with counts (topics screen)
     r = c.get("/api/searches")
     row = next(x for x in r.json() if x["id"] == sid)
-    check("topics counts", row["counts"]["kept"] == 2 and row["counts"]["pending"] > 0, str(row["counts"]))
     check("backfill cursor seeded", bool(c.get(f"/api/searches/{sid}").json().get("date_from")))
+    check("topics counts", row["counts"]["kept"] == 2 and row["counts"]["pending"] > 0, str(row["counts"]))
 
     # frontend served?
     r = c.get("/")

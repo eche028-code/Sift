@@ -13,15 +13,6 @@ class Setting(SQLModel, table=True):
     value: str
 
 
-class Provider(SQLModel, table=True):
-    __tablename__ = "providers"
-    id: int | None = Field(default=None, primary_key=True)
-    name: str
-    base_url: str
-    api_key: str = ""
-    created_at: str = Field(default_factory=utcnow)
-
-
 class Search(SQLModel, table=True):
     __tablename__ = "searches"
     id: int | None = Field(default=None, primary_key=True)

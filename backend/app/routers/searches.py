@@ -105,7 +105,7 @@ async def create_search(body: SearchCreate) -> dict:
         s.commit()
         s.refresh(search)
     try:
-        reply = await llm.chat("translator", prompts.TRANSLATOR_SYSTEM, raw, temperature=0.0)
+        reply = await llm.chat("translator", prompts.translator_system(), raw, temperature=0.0)
         parsed = llm.extract_json(reply)
         translated = str(parsed.get("pubmed_query") or "").strip()
         if not translated:
@@ -205,7 +205,7 @@ async def run_search(search_id: int) -> dict:
         raise HTTPException(409, "already running")
     # fail fast if the triage role is missing, before kicking the background task
     try:
-        llm.resolve_role("triage")
+        llm.resolve_model()
     except llm.LLMNotConfigured as e:
         raise HTTPException(409, str(e))
     start_pipeline_task(search_id)
@@ -272,7 +272,7 @@ def pool(search_id: int) -> dict:
 @router.post("/{search_id}/synthesise")
 async def synthesise(search_id: int) -> dict:
     try:
-        llm.resolve_role("synthesis")
+        llm.resolve_model()
     except llm.LLMNotConfigured as e:
         raise HTTPException(409, str(e))
     try:

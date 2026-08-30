@@ -16,12 +16,18 @@ DEFAULTS: dict[str, str] = {
         "An optometrist focused on myopia control, orthokeratology, "
         "and anterior segment disease. Reads to guide clinical decisions."
     ),
-    "role.translator": "",
-    "role.triage": "",
-    "role.synthesis": "",
+    # One model does all three jobs; the endpoint is an OpenAI-compatible /v1.
+    "llm_provider": "",
+    "llm_base_url": "",
+    "llm_api_key": "",
+    "llm_model": "",
+    # Per-function steering. Blank means "use the built-in instructions".
+    "prompt_translator": "",
+    "prompt_triage": "",
+    "prompt_synthesis": "",
 }
 
-ROLE_KEYS = ("role.translator", "role.triage", "role.synthesis")
+SECRET_KEYS = ("llm_api_key",)
 
 
 def get(key: str) -> str:
@@ -61,18 +67,16 @@ def get_int(key: str, fallback: int) -> int:
 
 
 def all_settings() -> dict:
+    """Everything the UI needs. Secrets are reported as set/last4, never echoed."""
     merged = dict(DEFAULTS)
     with session() as s:
         for row in s.exec(select(Setting)).all():
             merged[row.key] = row.value
     out: dict = {}
     for k, v in merged.items():
-        if k in ROLE_KEYS:
-            role = k.split(".", 1)[1]
-            try:
-                out.setdefault("roles", {})[role] = json.loads(v) if v else None
-            except ValueError:
-                out.setdefault("roles", {})[role] = None
+        if k in SECRET_KEYS:
+            out[f"{k}_set"] = bool(v)
+            out[f"{k}_last4"] = v[-4:] if len(v) >= 4 else ""
         else:
             out[k] = v
     return out

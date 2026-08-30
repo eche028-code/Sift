@@ -302,7 +302,7 @@ async def _run_pipeline_inner(
 
         if todo:
             try:
-                _provider, model_name = llm.resolve_role("triage")
+                _label, _url, _key, model_name = llm.resolve_model()
             except llm.LLMNotConfigured:
                 raise
             system = prompts.triage_system(search.raw_query, search.translated_query, recent_feedback())

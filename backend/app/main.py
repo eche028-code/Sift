@@ -12,7 +12,7 @@ from sqlmodel import select
 from . import scheduler
 from .db import BASE_DIR, DATA_DIR, init_db, session
 from .models import Search
-from .routers import crawl, notes, providers, results, searches, settings
+from .routers import crawl, llm_config, notes, results, searches, settings
 
 log = logging.getLogger("sift")
 
@@ -63,7 +63,7 @@ app = FastAPI(title="Sift", lifespan=lifespan)
 app.include_router(searches.router)
 app.include_router(results.router)
 app.include_router(notes.router)
-app.include_router(providers.router)
+app.include_router(llm_config.router)
 app.include_router(settings.router)
 app.include_router(crawl.router)
 

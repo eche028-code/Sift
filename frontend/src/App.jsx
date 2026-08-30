@@ -20,9 +20,11 @@ export default function App() {
   }, []);
 
   const s = nav.screen;
+  // Settings doubles as the desktop setup console, so it alone escapes the phone column.
+  const wide = s === "settings";
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex justify-center">
-      <div className="w-full max-w-md min-h-screen flex flex-col bg-slate-950">
+      <div className={`w-full min-h-screen flex flex-col bg-slate-950 ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}>
         {s === "topics" && <Topics go={go} />}
         {s === "search" && <SearchScreen go={go} />}
         {s === "filters" && <Filters go={go} search={nav.search} searchId={nav.searchId ?? nav.search?.id} />}

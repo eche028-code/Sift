@@ -62,12 +62,12 @@ const Row = ({ row, onOpen, onToggleSave, onDelete }) => (
 export default function Topics({ go }) {
   const [searches, setSearches] = useState(null);
   const [notes, setNotes] = useState([]);
-  const [providers, setProviders] = useState(null);
+  const [config, setConfig] = useState(null);
 
   const load = () => {
     api.listSearches().then(setSearches).catch(() => setSearches([]));
     api.listNotes().then(setNotes).catch(() => {});
-    api.listProviders().then(setProviders).catch(() => setProviders(null));
+    api.getSettings().then(setConfig).catch(() => setConfig(null));
   };
   useEffect(load, []);
 
@@ -88,7 +88,7 @@ export default function Topics({ go }) {
 
   const saved = (searches || []).filter((x) => x.is_saved);
   const recent = (searches || []).filter((x) => !x.is_saved).slice(0, 10);
-  const needsSetup = providers !== null && providers.length === 0;
+  const needsSetup = config !== null && !(config.llm_base_url?.trim() && config.llm_model?.trim());
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -118,7 +118,7 @@ export default function Topics({ go }) {
               >
                 <p className="text-sm text-teal-200 font-medium">Connect a model to begin</p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Add an LLM provider and assign the translator, triage and synthesis roles in Settings.
+                  Pick a provider, paste an API key and name a model in Settings.
                 </p>
               </button>
             )}
