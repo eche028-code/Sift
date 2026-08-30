@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+html,
+body {
+  background: #020617;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  padding-bottom: env(safe-area-inset-bottom);
+}
