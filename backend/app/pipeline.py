@@ -175,15 +175,26 @@ def rank_search(search_id: int) -> int:
     return pending
 
 
-# ── the pipeline ─────────────────────────────────────────────
+# ── the pipeline: fetch stage (free) then screen stage (spends tokens) ──
 
 
-def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], int, dict[int, str]]:
-    """Upsert papers, link into search_results. Returns (linked_ids, new_count, pmcids)."""
+def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], int]:
+    """Upsert papers, link into search_results. Returns (linked_ids, new_count).
+
+    Pending links from a previous run of this search are dropped first, so a
+    refined query replaces the un-reviewed results instead of piling onto them.
+    Kept/skipped links are history and always survive.
+    """
     linked: list[int] = []
     new_count = 0
-    pmcids: dict[int, str] = {}
     with session() as s:
+        for sr in s.exec(
+            select(SearchResult).where(
+                SearchResult.search_id == search_id, SearchResult.status == "pending"
+            )
+        ).all():
+            s.delete(sr)
+        s.commit()
         for rec in records:
             paper = None
             if rec["pmid"]:
@@ -201,33 +212,48 @@ def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], in
                     pub_date=rec["pub_date"],
                     abstract=rec["abstract"],
                     url=rec["url"],
+                    pmcid=rec.get("pmcid"),
                 )
                 s.add(paper)
                 s.commit()
                 s.refresh(paper)
                 new_count += 1
-            if rec.get("pmcid"):
-                pmcids[paper.id] = rec["pmcid"]
+            elif rec.get("pmcid") and not paper.pmcid:
+                paper.pmcid = rec["pmcid"]
+                s.add(paper)
+                s.commit()
             link = s.get(SearchResult, (search_id, paper.id))
             if link is None:
                 s.add(SearchResult(search_id=search_id, paper_id=paper.id))
                 s.commit()
             linked.append(paper.id)
-    return linked, new_count, pmcids
+    return linked, new_count
 
 
-async def run_pipeline(search_id: int) -> dict:
-    """Run search→fetch→dedupe→enrich→triage→rank for one search."""
+def _screening_workload(search_id: int) -> tuple[list[int], list[int]]:
+    """(all linked paper ids, subset with no triage row yet) for a search."""
+    with session() as s:
+        linked = list(s.exec(
+            select(SearchResult.paper_id).where(SearchResult.search_id == search_id)
+        ).all())
+        done = set(s.exec(
+            select(Triage.paper_id).where(Triage.paper_id.in_(linked))  # type: ignore[attr-defined]
+        ).all()) if linked else set()
+    return linked, [pid for pid in linked if pid not in done]
+
+
+async def run_fetch(search_id: int) -> dict:
+    """PubMed search→fetch→dedupe→link. No LLM calls — stops at stage 'fetched'."""
     if search_id in RUNNING:
         raise RuntimeError("already running")
     RUNNING.add(search_id)
     try:
-        return await _run_pipeline_inner(search_id)
+        return await _run_fetch_inner(search_id)
     finally:
         RUNNING.discard(search_id)
 
 
-async def _run_pipeline_inner(search_id: int) -> dict:
+async def _run_fetch_inner(search_id: int) -> dict:
     with session() as s:
         search = s.get(Search, search_id)
         if search is None:
@@ -239,17 +265,15 @@ async def _run_pipeline_inner(search_id: int) -> dict:
     term = search.translated_query
     if search.pdf_only:
         term = f"({term}) AND free full text[sb]"
-    date_from = search.date_from
-    date_to = search.date_to
 
     set_stage(search_id, "searching", found=None, fetched=0, no_abstract=0,
-              new_papers=0, to_screen=0, screened=0, passed=None, error=None)
+              new_papers=0, to_screen=None, screened=0, passed=None, error=None)
 
     stats = {"found": 0, "fetched": 0, "no_abstract": 0, "new_papers": 0}
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            count, webenv, qk = await esearch(client, term, date_from, date_to)
+            count, webenv, qk = await esearch(client, term, search.date_from, search.date_to)
             stats["found"] = count
             set_stage(search_id, found=count)
 
@@ -264,27 +288,53 @@ async def _run_pipeline_inner(search_id: int) -> dict:
                 set_stage(search_id, fetched=fetched, no_abstract=stats["no_abstract"])
             stats["fetched"] = fetched
 
-        linked, new_count, pmcids = _dedupe_and_link(records, search_id)
+        linked, new_count = _dedupe_and_link(records, search_id)
         stats["new_papers"] = new_count
-        set_stage(search_id, new_papers=new_count)
 
-        await enrich_papers(linked, pmcids)
+        _all, todo = _screening_workload(search_id)
+        set_stage(search_id, "fetched", new_papers=new_count,
+                  to_screen=len(todo), already_triaged=len(set(_all)) - len(set(todo)))
+        return stats
+    except Exception as e:
+        log.exception("fetch failed for search %s", search_id)
+        set_stage(search_id, "error", error=str(e)[:500])
+        raise
 
-        # ── triage ──
+
+async def run_screen(search_id: int) -> dict:
+    """Enrich→LLM triage→rank the already-fetched results. This is the stage that spends tokens."""
+    if search_id in RUNNING:
+        raise RuntimeError("already running")
+    RUNNING.add(search_id)
+    try:
+        return await _run_screen_inner(search_id)
+    finally:
+        RUNNING.discard(search_id)
+
+
+async def _run_screen_inner(search_id: int) -> dict:
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            raise ValueError(f"search {search_id} not found")
+
+    linked, todo_ids = _screening_workload(search_id)
+    set_stage(search_id, "screening", to_screen=len(todo_ids), screened=0, error=None)
+
+    try:
         with session() as s:
-            done = {
-                t for (t,) in s.exec(
-                    select(Triage.paper_id).where(Triage.paper_id.in_(linked))  # type: ignore[attr-defined]
-                ).all()
-            } if linked else set()
-            todo = [s.get(Paper, pid) for pid in linked if pid not in done]
-        set_stage(search_id, "screening", to_screen=len(todo), screened=0)
+            pmcids = {
+                p.id: p.pmcid
+                for pid in set(linked)
+                if (p := s.get(Paper, pid)) and p.pmcid
+            }
+        await enrich_papers(list(dict.fromkeys(linked)), pmcids)
+
+        with session() as s:
+            todo = [s.get(Paper, pid) for pid in todo_ids]
 
         if todo:
-            try:
-                _label, _url, _key, model_name = llm.resolve_model()
-            except llm.LLMNotConfigured:
-                raise
+            _label, _url, _key, model_name = llm.resolve_model()
             system = prompts.triage_system(search.raw_query, search.translated_query, recent_feedback())
             sem = asyncio.Semaphore(TRIAGE_CONCURRENCY)
             screened = 0
@@ -307,18 +357,19 @@ async def _run_pipeline_inner(search_id: int) -> dict:
 
         deck_size = rank_search(search_id)
         set_stage(search_id, "ready", passed=deck_size)
-
-        return stats
+        return {"screened": len(todo_ids), "passed": deck_size}
     except Exception as e:
-        log.exception("pipeline failed for search %s", search_id)
+        log.exception("screening failed for search %s", search_id)
         set_stage(search_id, "error", error=str(e)[:500])
         raise
 
 
-def start_pipeline_task(search_id: int) -> None:
+def start_pipeline_task(search_id: int, mode: str = "fetch") -> None:
+    stage = run_screen if mode == "screen" else run_fetch
+
     async def runner():
         try:
-            await run_pipeline(search_id)
+            await stage(search_id)
         except Exception:
             pass  # already logged and staged
 

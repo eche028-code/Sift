@@ -32,3 +32,13 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     SQLModel.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Additive column migrations for databases created before a model change."""
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(papers)")}
+        if "pmcid" not in cols:
+            conn.exec_driver_sql("ALTER TABLE papers ADD COLUMN pmcid TEXT")
+        conn.commit()

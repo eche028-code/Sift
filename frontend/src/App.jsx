@@ -6,6 +6,7 @@ import Filters from "./screens/Filters";
 import NotesList from "./screens/NotesList";
 import NoteView from "./screens/NoteView";
 import Pool from "./screens/Pool";
+import Results from "./screens/Results";
 import Scanning from "./screens/Scanning";
 import SearchScreen from "./screens/Search";
 import Settings from "./screens/Settings";
@@ -23,12 +24,15 @@ export default function App() {
   // Settings doubles as the desktop setup console, so it alone escapes the phone column.
   const wide = s === "settings";
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex justify-center">
-      <div className={`w-full min-h-screen flex flex-col bg-slate-950 ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}>
+    <div className="min-h-dvh bg-slate-950 text-slate-200 font-sans flex justify-center">
+      <div
+        className={`w-full h-dvh overflow-hidden flex flex-col bg-slate-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}
+      >
         {s === "topics" && <Topics go={go} />}
         {s === "search" && <SearchScreen go={go} />}
         {s === "filters" && <Filters go={go} search={nav.search} searchId={nav.searchId ?? nav.search?.id} />}
         {s === "scanning" && <Scanning go={go} searchId={nav.searchId} />}
+        {s === "results" && <Results go={go} searchId={nav.searchId} />}
         {s === "deck" && <Deck go={go} searchId={nav.searchId} />}
         {s === "pool" && <Pool go={go} searchId={nav.searchId} />}
         {s === "detail" && <Detail go={go} searchId={nav.searchId} paper={nav.paper} />}

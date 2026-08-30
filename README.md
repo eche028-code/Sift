@@ -43,7 +43,11 @@ Anthropic's compatibility endpoint
 of the reply. It works, but keep the "reply with JSON only" wording if you edit the triage
 instructions.
 
-Then: New search → confirm/edit the interpreted PubMed query → Run search → swipe.
+Then: New search → confirm/edit the interpreted PubMed query → **Fetch results** (free, no
+AI) → review the result list, refine the query as often as you like → **Screen N abstracts**
+(the one step that spends tokens) → swipe. Tap a card mid-swipe to read the full title,
+summary and abstract; leave the deck any time — swipes are saved instantly, and the topic
+row on the home screen takes you back to where you stopped.
 
 ## Phone access (Tailscale)
 
@@ -68,7 +72,20 @@ schtasks /Create /TN "Sift" /TR "\"C:\Sift\start_sift.bat\"" /SC ONLOGON /RL LIM
 
 ## How the pipeline works
 
-`POST /api/searches` translates the question (translator instructions) and shows you the query for editing. **Run** then: PubMed `esearch`/`efetch` (capped at 200 records, newest first) → skip no-abstract records → dedupe into the global paper store (PMID, then normalised DOI) → Crossref fills metadata gaps, Unpaywall/PMC set `pdf_url` for OA papers → each new abstract is screened by the triage function (concurrency 5, JSON contract, one retry then `relevant=0`) → deck ranked by score desc, year desc. A paper triaged once is never re-screened, across all searches.
+Two stages, so tokens are never spent without an explicit go-ahead:
+
+1. **Fetch** (`POST /{id}/run`, free): PubMed `esearch`/`efetch` (capped at 200 records,
+   newest first) → skip no-abstract records → dedupe into the global paper store (PMID, then
+   normalised DOI) → stop at stage `fetched`. The results screen shows what came back — match
+   count, titles, and exactly how many *new* abstracts a screening run would send to the
+   model. From there you can refine the query (an LLM revision steered by your instruction
+   plus a sample of the current results, or manual editing) and re-fetch as often as you
+   like; a re-fetch replaces the search's un-reviewed results, while kept/skipped history
+   always survives.
+2. **Screen** (`POST /{id}/screen`, spends tokens): Crossref fills metadata gaps,
+   Unpaywall/PMC set `pdf_url` for OA papers → each new abstract is screened by the triage
+   function (concurrency 5, JSON contract, one retry then `relevant=0`) → deck ranked by
+   score desc, year desc. A paper triaged once is never re-screened, across all searches.
 
 The triage prompt includes your 20 most recent kept and 20 most recent skipped papers as few-shot steering — the deck adapts to how you swipe, no training involved.
 

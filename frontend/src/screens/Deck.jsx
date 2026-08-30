@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Undo2, X } from "lucide-react";
+import { Check, ChevronDown, Undo2, X } from "lucide-react";
 import { api, queueLength } from "../api";
-import { Busy, ErrorBox, Header, PaperCard, PoolChip } from "../components/bits";
+import { Busy, ErrorBox, Header, PaperCard, PaperFull, PoolChip } from "../components/bits";
 
 export default function Deck({ go, searchId }) {
   const [deck, setDeck] = useState(null); // null = loading
@@ -9,10 +9,12 @@ export default function Deck({ go, searchId }) {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState(null);
   const [queueN, setQueueN] = useState(queueLength());
+  const [expanded, setExpanded] = useState(false); // full, unclipped view of the top card
 
   const [drag, setDrag] = useState({ dx: 0, dy: 0, active: false });
   const [flying, setFlying] = useState(null); // 'left' | 'right'
   const start = useRef({ x: 0, y: 0 });
+  const tap = useRef({ at: 0, moved: false });
 
   useEffect(() => {
     let alive = true;
@@ -61,19 +63,35 @@ export default function Deck({ go, searchId }) {
 
   const onDown = (e) => {
     if (flying) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch { /* pointer already gone (fast tap) — tracking still works */ }
     start.current = { x: e.clientX, y: e.clientY };
+    tap.current = { at: Date.now(), moved: false };
     setDrag({ dx: 0, dy: 0, active: true });
   };
   const onMove = (e) => {
     if (!drag.active || flying) return;
-    setDrag({ dx: e.clientX - start.current.x, dy: e.clientY - start.current.y, active: true });
+    const dx = e.clientX - start.current.x;
+    const dy = e.clientY - start.current.y;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) tap.current.moved = true;
+    setDrag({ dx, dy, active: true });
   };
   const onUp = () => {
     if (!drag.active || flying) return;
+    if (!tap.current.moved && Date.now() - tap.current.at < 500) {
+      setDrag({ dx: 0, dy: 0, active: false });
+      setExpanded(true);
+      return;
+    }
     if (drag.dx > 110) fly("right");
     else if (drag.dx < -110) fly("left");
     else setDrag({ dx: 0, dy: 0, active: false });
+  };
+
+  const decideExpanded = (dir) => {
+    setExpanded(false);
+    fly(dir);
   };
 
   const topStyle = flying
@@ -164,7 +182,7 @@ export default function Deck({ go, searchId }) {
               onPointerUp={onUp}
               onPointerCancel={onUp}
             >
-              <PaperCard p={deck[0]} stampKeep={stampKeep} stampSkip={stampSkip} />
+              <PaperCard p={deck[0]} stampKeep={stampKeep} stampSkip={stampSkip} tapHint />
             </div>
           </div>
         )}
@@ -205,6 +223,48 @@ export default function Deck({ go, searchId }) {
         <p className="text-center font-mono text-xs text-amber-500 pb-3 -mt-2">
           {queueN} decision{queueN > 1 ? "s" : ""} queued — will sync when online
         </p>
+      )}
+
+      {expanded && deck[0] && (
+        <div className="fixed inset-0 z-40 flex justify-center bg-slate-950/80">
+          <div className="w-full max-w-md h-full flex flex-col bg-slate-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+              <span className="font-mono text-xs text-slate-500">{seen + 1} of {total}</span>
+              <button
+                onClick={() => setExpanded(false)}
+                className="p-2 -mr-2 text-slate-400 active:text-slate-200"
+                aria-label="Back to deck"
+              >
+                <ChevronDown size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              <PaperFull p={deck[0]} />
+            </div>
+            <div className="flex items-center justify-center gap-8 py-4 border-t border-slate-800">
+              <button
+                onClick={() => decideExpanded("left")}
+                aria-label="Skip"
+                className="w-14 h-14 rounded-full border-2 border-rose-500 text-rose-400 flex items-center justify-center active:bg-rose-950"
+              >
+                <X size={24} />
+              </button>
+              <button
+                onClick={() => setExpanded(false)}
+                className="rounded-full border border-slate-600 text-slate-400 font-mono text-xs px-4 py-2.5 active:bg-slate-900"
+              >
+                decide later
+              </button>
+              <button
+                onClick={() => decideExpanded("right")}
+                aria-label="Add to pool"
+                className="w-14 h-14 rounded-full border-2 border-emerald-500 text-emerald-400 flex items-center justify-center active:bg-emerald-950"
+              >
+                <Check size={24} />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

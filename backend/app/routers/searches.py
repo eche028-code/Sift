@@ -7,7 +7,7 @@ from sqlmodel import func, select
 from .. import llm, prompts
 from ..db import session
 from ..models import Note, Paper, Search, SearchResult, Triage
-from ..pipeline import RUNNING, start_pipeline_task
+from ..pipeline import RUNNING, _screening_workload, start_pipeline_task
 from ..synthesis import synthesise as run_synthesis
 
 router = APIRouter(prefix="/api/searches", tags=["searches"])
@@ -193,6 +193,7 @@ def delete_search(search_id: int) -> dict:
 
 @router.post("/{search_id}/run")
 async def run_search(search_id: int) -> dict:
+    """Fetch stage only: PubMed search→fetch→link, stopping at 'fetched'. No LLM cost."""
     with session() as s:
         search = s.get(Search, search_id)
         if search is None:
@@ -201,13 +202,130 @@ async def run_search(search_id: int) -> dict:
             raise HTTPException(400, "no translated query — translate first")
     if search_id in RUNNING:
         raise HTTPException(409, "already running")
-    # fail fast if the triage role is missing, before kicking the background task
+    start_pipeline_task(search_id, "fetch")
+    return {"started": True}
+
+
+@router.post("/{search_id}/screen")
+async def screen_search(search_id: int) -> dict:
+    """Screen stage: enrich→triage→rank the fetched results. This spends tokens."""
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            raise HTTPException(404, "search not found")
+        n_linked = s.exec(
+            select(func.count()).select_from(SearchResult).where(SearchResult.search_id == search_id)
+        ).one()
+    if n_linked == 0:
+        raise HTTPException(400, "no fetched results — run the search first")
+    if search_id in RUNNING:
+        raise HTTPException(409, "already running")
+    # fail fast if abstracts need screening but no model is configured
+    _linked, todo = _screening_workload(search_id)
+    if todo:
+        try:
+            llm.resolve_model()
+        except llm.LLMNotConfigured as e:
+            raise HTTPException(409, str(e))
+    start_pipeline_task(search_id, "screen")
+    return {"started": True}
+
+
+@router.get("/{search_id}/results")
+def search_results(search_id: int) -> dict:
+    """The fetched records with their screening status — shown before committing tokens."""
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            raise HTTPException(404, "search not found")
+        rows = s.exec(
+            select(Paper, Triage, SearchResult)
+            .join(SearchResult, SearchResult.paper_id == Paper.id)
+            .join(Triage, Triage.paper_id == Paper.id, isouter=True)
+            .where(SearchResult.search_id == search_id)
+            .order_by(Paper.year.desc(), Paper.pub_date.desc())  # type: ignore[union-attr]
+        ).all()
+        papers = [
+            {
+                "paper_id": p.id,
+                "pmid": p.pmid,
+                "title": p.title,
+                "authors": p.authors,
+                "journal": p.journal,
+                "year": p.year,
+                "url": p.url,
+                "triaged": t is not None,
+                "relevant": None if t is None else bool(t.relevant),
+                "score": None if t is None else t.score,
+                "status": sr.status,
+            }
+            for p, t, sr in rows
+        ]
+        to_screen = sum(1 for x in papers if not x["triaged"])
+        return {
+            "search": _search_out(s, search),
+            "papers": papers,
+            "summary": {
+                "total": len(papers),
+                "to_screen": to_screen,
+                "already_triaged": len(papers) - to_screen,
+                "prior_relevant": sum(1 for x in papers if x["relevant"]),
+            },
+        }
+
+
+class RefineBody(BaseModel):
+    instruction: str
+
+
+@router.post("/{search_id}/refine")
+async def refine_search(search_id: int, body: RefineBody) -> dict:
+    """Revise the PubMed query with the LLM, steered by what the current query returned."""
+    instruction = body.instruction.strip()
+    if not instruction:
+        raise HTTPException(400, "instruction is empty")
+    if search_id in RUNNING:
+        raise HTTPException(409, "search is running — wait for it to finish")
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            raise HTTPException(404, "search not found")
+        titles = list(s.exec(
+            select(Paper.title)
+            .join(SearchResult, SearchResult.paper_id == Paper.id)
+            .where(SearchResult.search_id == search_id)
+            .order_by(Paper.year.desc())  # type: ignore[union-attr]
+            .limit(12)
+        ).all())
+        found = _detail(search).get("found")
+        raw_query, current_query = search.raw_query, search.translated_query
     try:
-        llm.resolve_model()
+        reply = await llm.chat(
+            "translator",
+            prompts.translator_system(),
+            prompts.refine_user(raw_query, current_query or "", found, titles, instruction),
+            temperature=0.0,
+        )
+        parsed = llm.extract_json(reply)
+        translated = str(parsed.get("pubmed_query") or "").strip()
+        if not translated:
+            raise ValueError("translator returned no pubmed_query")
+        rationale = str(parsed.get("rationale") or "").strip()
     except llm.LLMNotConfigured as e:
         raise HTTPException(409, str(e))
-    start_pipeline_task(search_id)
-    return {"started": True}
+    except Exception as e:
+        raise HTTPException(502, f"refinement failed: {e}")
+    with session() as s:
+        fresh = s.get(Search, search_id)
+        if fresh is None:
+            raise HTTPException(404, "search not found")
+        fresh.translated_query = translated
+        detail = _detail(fresh)
+        detail["rationale"] = rationale
+        fresh.stage_detail = json.dumps(detail)
+        s.add(fresh)
+        s.commit()
+        return _search_out(s, fresh)
 
 
 @router.get("/{search_id}/status")

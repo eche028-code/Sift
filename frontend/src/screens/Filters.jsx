@@ -17,6 +17,18 @@ const isoYearsAgo = (years) => {
   return d.toISOString().slice(0, 10);
 };
 
+// Recover the range button from a stored date_from, so re-editing a search
+// (e.g. in the refine loop) keeps its window instead of resetting to 5 yrs.
+const rangeFor = (search) => {
+  if (!search) return "5y";
+  if (!search.date_from) return search.stage === "new" ? "5y" : "all";
+  const years = (Date.now() - new Date(search.date_from).getTime()) / 31557600000;
+  if (years <= 1.5) return "1y";
+  if (years <= 6) return "5y";
+  if (years <= 12) return "10y";
+  return "all";
+};
+
 const Toggle = ({ on, onClick, icon, children }) => (
   <button
     onClick={onClick}
@@ -34,7 +46,7 @@ const Toggle = ({ on, onClick, icon, children }) => (
 export default function Filters({ go, search: initial, searchId }) {
   const [search, setSearch] = useState(initial || null);
   const [translated, setTranslated] = useState(initial?.translated_query || "");
-  const [range, setRange] = useState("5y");
+  const [range, setRange] = useState(() => rangeFor(initial));
   const [pdfOnly, setPdfOnly] = useState(initial ? !!initial.pdf_only : false);
   const [watch, setWatch] = useState(initial ? !!initial.is_saved : false);
   const [busy, setBusy] = useState(false);
@@ -45,6 +57,7 @@ export default function Filters({ go, search: initial, searchId }) {
     api.getSearch(searchId).then((sr) => {
       setSearch(sr);
       setTranslated(sr.translated_query || "");
+      setRange(rangeFor(sr));
       setPdfOnly(!!sr.pdf_only);
       setWatch(!!sr.is_saved);
     }).catch(setError);
@@ -132,8 +145,8 @@ export default function Filters({ go, search: initial, searchId }) {
         </Toggle>
 
         <p className="font-mono text-xs text-slate-500">
-          Fetches up to 200 records, newest first. Run the search again whenever you want
-          newer papers — anything already triaged is never re-screened.
+          Fetches up to 200 records, newest first — free, no AI involved. You'll preview
+          the results and refine before anything is screened by the model.
         </p>
 
         {error && <ErrorBox error={error} />}
@@ -143,7 +156,7 @@ export default function Filters({ go, search: initial, searchId }) {
           onClick={run}
           className="mt-auto w-full rounded-xl bg-teal-500 text-slate-950 font-semibold py-4 disabled:opacity-30 active:bg-teal-400"
         >
-          {busy ? "Starting…" : "Run search"}
+          {busy ? "Starting…" : "Fetch results"}
         </button>
       </div>
     </>

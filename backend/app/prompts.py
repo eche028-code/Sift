@@ -39,6 +39,33 @@ def translator_system() -> str:
     ])
 
 
+def refine_user(
+    raw_query: str,
+    current_query: str,
+    found: int | None,
+    sample_titles: list[str],
+    instruction: str,
+) -> str:
+    """User message asking the translator to revise an existing query."""
+    parts = [
+        f'The clinician originally asked: "{raw_query}"',
+        "",
+        "The current PubMed query:",
+        current_query,
+    ]
+    if found is not None:
+        parts += ["", f"It matched {found} records."]
+    if sample_titles:
+        parts += ["", "A sample of the titles it returned:"]
+        parts += [f"- {t}" for t in sample_titles]
+    parts += [
+        "",
+        f"Revise the query according to this instruction from the clinician: {instruction}",
+        "Keep what still fits the original question; change only what the instruction requires.",
+    ]
+    return "\n".join(parts)
+
+
 def triage_system(raw_query: str, translated_query: str | None, feedback_block: str) -> str:
     profile = st.get("user_profile")
     parts = [

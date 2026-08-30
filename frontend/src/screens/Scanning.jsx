@@ -16,6 +16,10 @@ export default function Scanning({ go, searchId }) {
         const r = await api.status(searchId);
         if (!alive) return;
         setSt(r);
+        if (r.stage === "fetched") {
+          timer = setTimeout(() => alive && goRef.current("results", { searchId }), 400);
+          return;
+        }
         if (r.stage === "ready") {
           timer = setTimeout(() => alive && goRef.current("deck", { searchId }), 500);
           return;
@@ -34,30 +38,33 @@ export default function Scanning({ go, searchId }) {
   const stage = st?.stage;
   const d = st?.stage_detail || {};
 
-  const searchDone = stage === "screening" || stage === "ready";
+  const screening = stage === "screening" || stage === "ready";
   const screenLabel =
-    d.to_screen === 0 && searchDone
+    d.to_screen === 0 && screening
       ? "No new abstracts — reusing earlier screenings"
       : `Screening ${d.to_screen ?? "…"} abstracts with triage model` +
         (stage === "screening" && d.to_screen ? ` (${d.screened ?? 0}/${d.to_screen})` : "");
 
-  const lines = [
-    { label: "Translating natural language → PubMed syntax", state: "done" },
-    {
-      label:
-        "Querying PubMed · Crossref · Unpaywall" +
-        (d.found != null ? ` — ${d.found} records` : ""),
-      state: stage === "searching" ? "active" : searchDone ? "done" : "todo",
-    },
-    {
-      label: screenLabel,
-      state: stage === "screening" ? "active" : stage === "ready" ? "done" : "todo",
-    },
-    {
-      label: d.passed != null ? `${d.passed} papers pass triage` : "Ranking the deck",
-      state: stage === "ready" ? "done" : "todo",
-    },
-  ];
+  const lines = screening
+    ? [
+        { label: "Enriching records — Crossref · Unpaywall · PMC", state: "done" },
+        { label: screenLabel, state: stage === "screening" ? "active" : "done" },
+        {
+          label: d.passed != null ? `${d.passed} papers pass triage` : "Ranking the deck",
+          state: stage === "ready" ? "done" : "todo",
+        },
+      ]
+    : [
+        { label: "Translating natural language → PubMed syntax", state: "done" },
+        {
+          label: "Querying PubMed" + (d.found != null ? ` — ${d.found} records` : ""),
+          state: stage === "searching" ? "active" : stage === "fetched" ? "done" : "todo",
+        },
+        {
+          label: "Preview the results — nothing is screened until you confirm",
+          state: stage === "fetched" ? "done" : "todo",
+        },
+      ];
 
   if (stage === "error") {
     return (

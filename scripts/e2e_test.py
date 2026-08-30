@@ -72,19 +72,50 @@ def main() -> int:
     r = c.patch(f"/api/searches/{sid}", json={"date_from": date_from, "pdf_only": False, "is_saved": True})
     check("PATCH filters", r.status_code == 200 and r.json()["is_saved"] is True)
 
-    # run the pipeline against real PubMed
+    # fetch stage against real PubMed — free, must stop at 'fetched'
+    def wait_for(stages: tuple, timeout: int = 240):
+        stage, detail = None, {}
+        for _ in range(timeout):
+            time.sleep(1)
+            st = c.get(f"/api/searches/{sid}/status").json()
+            stage, detail = st["stage"], st["stage_detail"]
+            if stage in stages or stage == "error":
+                break
+        return stage, detail
+
     r = c.post(f"/api/searches/{sid}/run")
-    check("POST run", r.status_code == 200)
-    stage, detail = None, {}
-    for _ in range(240):
-        time.sleep(1)
-        st = c.get(f"/api/searches/{sid}/status").json()
-        stage, detail = st["stage"], st["stage_detail"]
-        if stage in ("ready", "error"):
-            break
-    check("pipeline reaches ready", stage == "ready", f"stage={stage} detail={detail}")
+    check("POST run (fetch stage)", r.status_code == 200)
+    stage, detail = wait_for(("fetched",))
+    check("fetch stops at 'fetched' (no auto-screening)", stage == "fetched", f"stage={stage} detail={detail}")
     check("PubMed found records", (detail.get("found") or 0) > 0, f"found={detail.get('found')}")
+    check("to_screen counted", (detail.get("to_screen") or 0) > 0, f"to_screen={detail.get('to_screen')}")
+    check("nothing screened yet", detail.get("screened") == 0)
+
+    # results preview
+    r = c.get(f"/api/searches/{sid}/results")
+    res = r.json()
+    check("GET results", r.status_code == 200 and len(res["papers"]) > 0, f"{len(res.get('papers', []))} papers")
+    check("results summary", res["summary"]["to_screen"] == detail.get("to_screen")
+          and res["summary"]["total"] == len(res["papers"]), str(res["summary"]))
+    check("results papers untriaged", all(p["triaged"] is False for p in res["papers"]))
+
+    # refine the query, then re-fetch
+    r = c.post(f"/api/searches/{sid}/refine", json={"instruction": "only randomised trials in children"})
+    check("POST refine", r.status_code == 200 and bool(r.json().get("translated_query")), str(r.json())[:80])
+    r = c.post(f"/api/searches/{sid}/run")
+    check("re-run after refine", r.status_code == 200)
+    stage, detail = wait_for(("fetched",))
+    check("re-fetch reaches 'fetched'", stage == "fetched", f"stage={stage}")
+
+    # commit to screening — this is the stage that spends tokens
+    r = c.post(f"/api/searches/{sid}/screen")
+    check("POST screen", r.status_code == 200)
+    stage, detail = wait_for(("ready",))
+    check("screening reaches ready", stage == "ready", f"stage={stage} detail={detail}")
     check("papers screened", (detail.get("to_screen") or 0) > 0 and detail.get("screened") == detail.get("to_screen"))
+
+    r = c.get(f"/api/searches/{sid}/results")
+    check("results show triaged after screening", all(p["triaged"] for p in r.json()["papers"]))
 
     # deck
     r = c.get(f"/api/searches/{sid}/deck")

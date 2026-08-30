@@ -12,6 +12,12 @@ const stageLine = (row) => {
   if (RUNNING_STAGES.includes(row.stage)) return "running — tap to watch";
   if (row.stage === "error") return "error — tap for details";
   if (row.stage === "new") return "translated, not run yet";
+  if (row.stage === "fetched") {
+    const n = row.stage_detail?.to_screen;
+    return n > 0
+      ? `fetched — ${n} to screen, awaiting your go-ahead`
+      : "fetched — tap to review results";
+  }
   const c = row.counts;
   const bits = [];
   if (c.pending > 0) bits.push(`${c.pending} to review`);
@@ -74,6 +80,7 @@ export default function Topics({ go }) {
   const openRow = (row) => {
     if (RUNNING_STAGES.includes(row.stage) || row.stage === "error") go("scanning", { searchId: row.id });
     else if (row.stage === "new") go("filters", { searchId: row.id });
+    else if (row.stage === "fetched") go("results", { searchId: row.id });
     else go("deck", { searchId: row.id });
   };
   const toggleSave = async (row) => {
@@ -92,7 +99,7 @@ export default function Topics({ go }) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-5 pt-14 pb-4 flex items-start justify-between">
+      <div className="px-5 pt-8 pb-4 flex items-start justify-between">
         <div>
           <Wordmark />
           <p className="text-sm text-slate-400 mt-2">AI-screened papers, one card at a time.</p>

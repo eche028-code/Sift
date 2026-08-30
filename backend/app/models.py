@@ -22,7 +22,7 @@ class Search(SQLModel, table=True):
     date_to: str | None = None
     pdf_only: int = 0
     is_saved: int = 0
-    stage: str = "new"  # new|translating|searching|screening|ready|error
+    stage: str = "new"  # new|translating|searching|fetched|screening|ready|error
     stage_detail: str | None = None  # JSON
     created_at: str = Field(default_factory=utcnow)
 
@@ -40,6 +40,7 @@ class Paper(SQLModel, table=True):
     abstract: str | None = None
     url: str | None = None
     pdf_url: str | None = None
+    pmcid: str | None = None
     fetched_at: str = Field(default_factory=utcnow)
 
 

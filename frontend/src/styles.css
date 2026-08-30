@@ -7,6 +7,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-#root {
-  padding-bottom: env(safe-area-inset-bottom);
+/* Old WebKit without dvh units: fall back to the classic viewport height. */
+@supports not (height: 100dvh) {
+  .h-dvh {
+    height: 100vh;
+  }
+  .min-h-dvh {
+    min-height: 100vh;
+  }
 }
