@@ -58,16 +58,27 @@ export const Meter = ({ score }) => {
   );
 };
 
+// Findings run long (median ~260 chars), so the summary block takes every pixel
+// the fixed rows leave behind and fades out rather than clamping to a line count.
+const FADE = "linear-gradient(to bottom, #000 80%, transparent 100%)";
+
 // The paper card — cream stock on the dark reading-room ground.
 // tapHint (top card only): advertise that a tap opens the full, unclipped view.
 export const PaperCard = ({ p, stampKeep = 0, stampSkip = 0, tapHint = false }) => {
   const titleRef = useRef(null);
-  const findingRef = useRef(null);
+  const bodyRef = useRef(null);
   const [clipped, setClipped] = useState(false);
 
   useEffect(() => {
     const overflows = (el) => !!el && el.scrollHeight > el.clientHeight + 1;
-    setClipped(overflows(titleRef.current) || overflows(findingRef.current));
+    // The body is flex-sized, so measure after layout settles and on every resize.
+    const check = () => setClipped(overflows(titleRef.current) || overflows(bodyRef.current));
+    const raf = requestAnimationFrame(check);
+    window.addEventListener("resize", check);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", check);
+    };
   }, [p]);
 
   return (
@@ -85,7 +96,7 @@ export const PaperCard = ({ p, stampKeep = 0, stampSkip = 0, tapHint = false }) 
         SKIP
       </div>
 
-      <div className="p-5 flex flex-col gap-3 h-full">
+      <div className="p-4 flex flex-col gap-2.5 h-full min-h-0">
         <div className="flex items-center gap-2 flex-wrap">
           <DesignChip>{p.design || "Study"}</DesignChip>
           <span className="font-mono text-xs text-stone-500">{p.year || "—"}</span>
@@ -97,22 +108,30 @@ export const PaperCard = ({ p, stampKeep = 0, stampSkip = 0, tapHint = false }) 
           )}
         </div>
 
-        <h2 ref={titleRef} className="font-serif text-xl leading-snug line-clamp-4">{p.title}</h2>
+        <h2 ref={titleRef} className="font-serif text-lg leading-snug line-clamp-4">{p.title}</h2>
 
-        {p.finding && (
-          <p
-            ref={findingRef}
-            className="text-sm font-medium border-l-2 border-teal-600 pl-3 text-stone-800 line-clamp-6"
-          >
-            {p.finding}
-          </p>
-        )}
+        <div
+          ref={bodyRef}
+          className="flex-1 min-h-0 overflow-hidden"
+          style={clipped ? { maskImage: FADE, WebkitMaskImage: FADE } : undefined}
+        >
+          {p.finding && (
+            <p className="text-sm font-medium border-l-2 border-teal-600 pl-3 text-stone-800 leading-relaxed">
+              {p.finding}
+            </p>
+          )}
+          {p.abstract && (
+            <p className="mt-2.5 pl-3 text-xs leading-relaxed text-stone-500 whitespace-pre-line">
+              {p.abstract}
+            </p>
+          )}
+        </div>
 
-        <p className="font-mono text-xs text-stone-500">
+        <p className="font-mono text-xs text-stone-500 truncate">
           n={p.n ?? "—"} · {p.followup || "—"} · {p.authors || "authors unlisted"}
         </p>
 
-        <div className="mt-auto flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           <Meter score={p.score} />
           <div className="flex gap-3 flex-wrap">
             <BadgeDot ok={p.peer_reviewed}>Peer-reviewed</BadgeDot>
@@ -120,15 +139,15 @@ export const PaperCard = ({ p, stampKeep = 0, stampSkip = 0, tapHint = false }) 
             <BadgeDot ok={p.masked}>Masked</BadgeDot>
           </div>
           {p.weakness && (
-            <p className="flex items-start gap-2 text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2">
-              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <p className="flex items-start gap-2 text-xs text-amber-700 bg-amber-100 rounded-lg px-2.5 py-1.5">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" />
               <span className="line-clamp-2">{p.weakness}</span>
             </p>
           )}
           {tapHint && (
-            <p className="flex items-center justify-center gap-1.5 font-mono text-[11px] uppercase tracking-wide text-stone-400 -mb-1">
+            <p className="flex items-center justify-center gap-1.5 font-mono text-[11px] uppercase tracking-wide text-stone-400 -mb-0.5">
               <Maximize2 size={11} />
-              {clipped ? "text clipped — tap to read in full" : "tap for abstract & details"}
+              {clipped ? "tap to read it all" : "tap for details"}
             </p>
           )}
         </div>

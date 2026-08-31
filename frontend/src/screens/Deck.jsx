@@ -138,11 +138,7 @@ export default function Deck({ go, searchId }) {
         onBack={() => go("topics")}
         right={<PoolChip count={counts.kept} onClick={() => go("pool", { searchId })} />}
       />
-      <p className="text-center font-mono text-xs text-slate-500 pt-3">
-        {deck.length > 0 ? `${seen + 1} of ${total}` : "deck cleared"}
-      </p>
-
-      <div className="flex-1 relative px-5 py-4 overflow-hidden">
+      <div className="flex-1 relative px-3 pt-2.5 pb-1.5 overflow-hidden">
         {deck.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-6">
             <p className="font-serif text-2xl text-amber-50">Deck cleared.</p>
@@ -188,8 +184,19 @@ export default function Deck({ go, searchId }) {
         )}
       </div>
 
+      {/* Progress and notices ride above the buttons, so the buttons stay pinned
+          to the very bottom of the screen where the thumb already is. */}
+      {(deck.length > 0 || queueN > 0) && (
+        <div className="flex items-center justify-center gap-2 pb-1.5 font-mono text-[11px]">
+          {deck.length > 0 && <span className="text-slate-500">{seen + 1} of {total}</span>}
+          {deck.length > 0 && seen === 0 && (
+            <span className="text-slate-600">· swipe right to keep, left to skip</span>
+          )}
+          {queueN > 0 && <span className="text-amber-500">· {queueN} queued offline</span>}
+        </div>
+      )}
       {deck.length > 0 && (
-        <div className="flex items-center justify-center gap-8 pb-8 pt-2">
+        <div className="flex items-center justify-center gap-8 pb-3">
           <button
             onClick={() => fly("left")}
             aria-label="Skip"
@@ -214,16 +221,6 @@ export default function Deck({ go, searchId }) {
           </button>
         </div>
       )}
-      {seen === 0 && deck.length > 0 && (
-        <p className="text-center font-mono text-xs text-slate-600 pb-4 -mt-4">
-          swipe right to keep · left to skip
-        </p>
-      )}
-      {queueN > 0 && (
-        <p className="text-center font-mono text-xs text-amber-500 pb-3 -mt-2">
-          {queueN} decision{queueN > 1 ? "s" : ""} queued — will sync when online
-        </p>
-      )}
 
       {expanded && deck[0] && (
         <div className="fixed inset-0 z-40 flex justify-center bg-slate-950/80">
@@ -241,7 +238,7 @@ export default function Deck({ go, searchId }) {
             <div className="flex-1 overflow-y-auto px-5 py-5">
               <PaperFull p={deck[0]} />
             </div>
-            <div className="flex items-center justify-center gap-8 py-4 border-t border-slate-800">
+            <div className="flex items-center justify-center gap-8 pt-3 pb-3 border-t border-slate-800">
               <button
                 onClick={() => decideExpanded("left")}
                 aria-label="Skip"
