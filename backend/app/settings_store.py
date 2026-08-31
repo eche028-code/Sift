@@ -1,5 +1,3 @@
-import json
-
 from sqlmodel import select
 
 from .db import session
@@ -47,16 +45,6 @@ def set(key: str, value: str) -> None:
             row.value = value
         s.add(row)
         s.commit()
-
-
-def get_json(key: str) -> dict | None:
-    raw = get(key)
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except ValueError:
-        return None
 
 
 def get_int(key: str, fallback: int) -> int:

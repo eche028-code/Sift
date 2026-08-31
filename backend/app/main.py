@@ -2,7 +2,6 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse

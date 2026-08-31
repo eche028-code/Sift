@@ -126,7 +126,7 @@ async def chat(request: Request):
         content = translator_reply(user)
     elif '"relevant"' in system:
         content = triage_reply(user)
-    elif "evidence note" in system.lower() or "## Findings" in system:
+    elif "evidence note" in system.lower():
         content = synthesis_reply(user)
     else:
         content = "ok"

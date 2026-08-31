@@ -5,7 +5,6 @@
 import asyncio
 import json
 import logging
-from datetime import date, datetime, timezone
 
 import httpx
 from pydantic import BaseModel, field_validator
@@ -15,8 +14,8 @@ from . import llm, prompts
 from . import settings_store as st
 from .db import session
 from .enrich import enrich_papers
-from .models import Paper, Search, SearchResult, Triage, utcnow
-from .pubmed import esearch, efetch_page, normalise_doi
+from .models import Paper, Search, SearchResult, Triage
+from .pubmed import esearch, efetch_page
 
 log = logging.getLogger("sift.pipeline")
 
@@ -178,15 +177,13 @@ def rank_search(search_id: int) -> int:
 # ── the pipeline: fetch stage (free) then screen stage (spends tokens) ──
 
 
-def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], int]:
-    """Upsert papers, link into search_results. Returns (linked_ids, new_count).
+def _dedupe_and_link(records: list[dict], search_id: int) -> None:
+    """Upsert papers and link them into search_results.
 
     Pending links from a previous run of this search are dropped first, so a
     refined query replaces the un-reviewed results instead of piling onto them.
     Kept/skipped links are history and always survive.
     """
-    linked: list[int] = []
-    new_count = 0
     with session() as s:
         for sr in s.exec(
             select(SearchResult).where(
@@ -217,7 +214,6 @@ def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], in
                 s.add(paper)
                 s.commit()
                 s.refresh(paper)
-                new_count += 1
             elif rec.get("pmcid") and not paper.pmcid:
                 paper.pmcid = rec["pmcid"]
                 s.add(paper)
@@ -226,8 +222,6 @@ def _dedupe_and_link(records: list[dict], search_id: int) -> tuple[list[int], in
             if link is None:
                 s.add(SearchResult(search_id=search_id, paper_id=paper.id))
                 s.commit()
-            linked.append(paper.id)
-    return linked, new_count
 
 
 def _screening_workload(search_id: int) -> tuple[list[int], list[int]]:
@@ -267,9 +261,9 @@ async def _run_fetch_inner(search_id: int) -> dict:
         term = f"({term}) AND free full text[sb]"
 
     set_stage(search_id, "searching", found=None, fetched=0, no_abstract=0,
-              new_papers=0, to_screen=None, screened=0, passed=None, error=None)
+              to_screen=None, screened=0, passed=None, error=None)
 
-    stats = {"found": 0, "fetched": 0, "no_abstract": 0, "new_papers": 0}
+    stats = {"found": 0, "fetched": 0, "no_abstract": 0}
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -288,12 +282,10 @@ async def _run_fetch_inner(search_id: int) -> dict:
                 set_stage(search_id, fetched=fetched, no_abstract=stats["no_abstract"])
             stats["fetched"] = fetched
 
-        linked, new_count = _dedupe_and_link(records, search_id)
-        stats["new_papers"] = new_count
+        _dedupe_and_link(records, search_id)
 
-        _all, todo = _screening_workload(search_id)
-        set_stage(search_id, "fetched", new_papers=new_count,
-                  to_screen=len(todo), already_triaged=len(set(_all)) - len(set(todo)))
+        todo = _screening_workload(search_id)[1]
+        set_stage(search_id, "fetched", to_screen=len(todo))
         return stats
     except Exception as e:
         log.exception("fetch failed for search %s", search_id)

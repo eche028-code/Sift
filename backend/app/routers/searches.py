@@ -103,6 +103,51 @@ def card(paper: Paper, triage: Triage, sr: SearchResult) -> dict:
     }
 
 
+async def _llm_json(role: str, system: str, user: str, temperature: float, failure: str) -> dict:
+    """One LLM round-trip parsed as JSON, with the error mapping every endpoint here shares."""
+    try:
+        reply = await llm.chat(role, system, user, temperature=temperature)
+        return llm.extract_json(reply)
+    except llm.LLMNotConfigured as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"{failure}: {e}")
+
+
+async def _translate(system: str, user: str, failure: str) -> tuple[str, str, str]:
+    """A translator round: (pubmed_query, rationale, refined_question).
+
+    create/refine/clarify differ only in the prompt they send, the error wording,
+    and which of these three fields they go on to persist.
+    """
+    parsed = await _llm_json("translator", system, user, 0.0, failure)
+    translated = str(parsed.get("pubmed_query") or "").strip()
+    if not translated:
+        raise HTTPException(502, f"{failure}: translator returned no pubmed_query")
+    return (
+        translated,
+        str(parsed.get("rationale") or "").strip(),
+        str(parsed.get("refined_question") or "").strip(),
+    )
+
+
+def _apply_translation(search_id: int, translated: str, rationale: str, **fields) -> dict:
+    """Persist a new query (plus any extra columns) and merge the rationale into stage_detail."""
+    with session() as s:
+        fresh = s.get(Search, search_id)
+        if fresh is None:
+            raise HTTPException(404, "search not found")
+        fresh.translated_query = translated
+        for key, value in fields.items():
+            setattr(fresh, key, value)
+        detail = _detail(fresh)
+        detail["rationale"] = rationale
+        fresh.stage_detail = json.dumps(detail)
+        s.add(fresh)
+        s.commit()
+        return _search_out(s, fresh)
+
+
 class SearchCreate(BaseModel):
     raw_query: str
 
@@ -118,30 +163,15 @@ async def create_search(body: SearchCreate) -> dict:
         s.commit()
         s.refresh(search)
     try:
-        reply = await llm.chat("translator", prompts.translator_system(), raw, temperature=0.0)
-        parsed = llm.extract_json(reply)
-        translated = str(parsed.get("pubmed_query") or "").strip()
-        if not translated:
-            raise ValueError("translator returned no pubmed_query")
-        rationale = str(parsed.get("rationale") or "").strip()
-    except llm.LLMNotConfigured as e:
-        with session() as s:
+        translated, rationale, _refined = await _translate(
+            prompts.translator_system(), raw, "translation failed"
+        )
+    except HTTPException:
+        with session() as s:  # a search with no query is useless — don't leave it behind
             s.delete(s.get(Search, search.id))
             s.commit()
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        with session() as s:
-            s.delete(s.get(Search, search.id))
-            s.commit()
-        raise HTTPException(502, f"translation failed: {e}")
-    with session() as s:
-        fresh = s.get(Search, search.id)
-        fresh.translated_query = translated
-        fresh.stage = "new"
-        fresh.stage_detail = json.dumps({"rationale": rationale})
-        s.add(fresh)
-        s.commit()
-        return _search_out(s, fresh)
+        raise
+    return _apply_translation(search.id, translated, rationale, stage="new")
 
 
 @router.get("")
@@ -323,33 +353,12 @@ async def refine_search(search_id: int, body: RefineBody) -> dict:
     if search_id in RUNNING:
         raise HTTPException(409, "search is running — wait for it to finish")
     raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
-    try:
-        reply = await llm.chat(
-            "translator",
-            prompts.translator_system(),
-            prompts.refine_user(raw_query, current_query, found, titles, instruction, clarifications),
-            temperature=0.0,
-        )
-        parsed = llm.extract_json(reply)
-        translated = str(parsed.get("pubmed_query") or "").strip()
-        if not translated:
-            raise ValueError("translator returned no pubmed_query")
-        rationale = str(parsed.get("rationale") or "").strip()
-    except llm.LLMNotConfigured as e:
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"refinement failed: {e}")
-    with session() as s:
-        fresh = s.get(Search, search_id)
-        if fresh is None:
-            raise HTTPException(404, "search not found")
-        fresh.translated_query = translated
-        detail = _detail(fresh)
-        detail["rationale"] = rationale
-        fresh.stage_detail = json.dumps(detail)
-        s.add(fresh)
-        s.commit()
-        return _search_out(s, fresh)
+    translated, rationale, _refined = await _translate(
+        prompts.translator_system(),
+        prompts.refine_user(raw_query, current_query, found, titles, instruction, clarifications),
+        "refinement failed",
+    )
+    return _apply_translation(search_id, translated, rationale)
 
 
 @router.post("/{search_id}/clarify/questions")
@@ -361,18 +370,13 @@ async def clarify_questions(search_id: int) -> dict:
     if search_id in RUNNING:
         raise HTTPException(409, "search is running — wait for it to finish")
     raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
-    try:
-        reply = await llm.chat(
-            "clarifier",
-            prompts.clarifier_system(),
-            prompts.clarify_questions_user(raw_query, current_query, found, titles, clarifications),
-            temperature=0.2,
-        )
-        parsed = llm.extract_json(reply)
-    except llm.LLMNotConfigured as e:
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"clarifier failed: {e}")
+    parsed = await _llm_json(
+        "clarifier",
+        prompts.clarifier_system(),
+        prompts.clarify_questions_user(raw_query, current_query, found, titles, clarifications),
+        0.2,
+        "clarifier failed",
+    )
     questions = []
     for q in (parsed.get("clarify_questions") or [])[:3]:  # the cap is code-enforced
         if not isinstance(q, dict):
@@ -408,37 +412,15 @@ async def clarify_search(search_id: int, body: ClarifyBody) -> dict:
         raise HTTPException(409, "search is running — wait for it to finish")
     raw_query, current_query, found, titles, prior = _revision_context(search_id)
     combined = prior + answers
-    try:
-        reply = await llm.chat(
-            "translator",
-            prompts.clarified_translator_system(),
-            prompts.clarify_answers_user(raw_query, current_query, found, titles, combined),
-            temperature=0.0,
-        )
-        parsed = llm.extract_json(reply)
-        translated = str(parsed.get("pubmed_query") or "").strip()
-        if not translated:
-            raise ValueError("translator returned no pubmed_query")
-        refined = str(parsed.get("refined_question") or "").strip()
-        rationale = str(parsed.get("rationale") or "").strip()
-    except llm.LLMNotConfigured as e:
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"clarification failed: {e}")
-    with session() as s:
-        fresh = s.get(Search, search_id)
-        if fresh is None:
-            raise HTTPException(404, "search not found")
-        fresh.translated_query = translated
-        fresh.clarifications = json.dumps(combined, ensure_ascii=False)
-        if refined:
-            fresh.refined_question = refined
-        detail = _detail(fresh)
-        detail["rationale"] = rationale
-        fresh.stage_detail = json.dumps(detail)
-        s.add(fresh)
-        s.commit()
-        return _search_out(s, fresh)
+    translated, rationale, refined = await _translate(
+        prompts.clarified_translator_system(),
+        prompts.clarify_answers_user(raw_query, current_query, found, titles, combined),
+        "clarification failed",
+    )
+    extra = {"clarifications": json.dumps(combined, ensure_ascii=False)}
+    if refined:  # keep any earlier refined question if this round didn't return one
+        extra["refined_question"] = refined
+    return _apply_translation(search_id, translated, rationale, **extra)
 
 
 @router.get("/{search_id}/status")
