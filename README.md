@@ -14,13 +14,33 @@ iPhone PWA ── https://<machine>.<tailnet>.ts.net:8443 (tailscale serve)
         PubMed E-utilities (no key) · Crossref · Unpaywall · your LLM endpoint
 ```
 
+## From a fresh clone
+
+This repo holds source only — `venv/`, `node_modules/`, `frontend/dist/` and `data/` are all
+gitignored, so a clone has to be built once before it will serve anything. Needs Python 3.10+
+(developed on 3.14) and Node 20.19+ (Vite 7's floor; developed on 24).
+
+```bat
+git clone https://github.com/eche028-code/Sift.git
+cd Sift
+python -m venv venv
+venv\Scripts\python -m pip install -r backend\requirements.txt
+cd frontend && npm install && npm run build && cd ..
+```
+
+`npm run build` produces `frontend/dist`, which FastAPI mounts and serves — skip it and you get
+a JSON stub instead of the app. `data/sift.db` is created on first start; nothing else is needed.
+
+Not on Windows? There is no `start_sift.bat` — use the dev command under
+[Development](#development), and `venv/bin/python` wherever this README says `venv\Scripts\python`.
+
 ## Run it
 
 ```bat
 start_sift.bat
 ```
 
-then open http://localhost:8000. (Everything is already built; the venv lives in `venv/`.)
+then open http://localhost:8000.
 
 First-time setup happens in the app, under **Settings** (gear icon):
 
