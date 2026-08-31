@@ -80,9 +80,13 @@ tailscale serve --bg 8000
 
 3. On the iPhone, open `https://<machine>.<tailnet>.ts.net` in Safari → Share → **Add to Home Screen**. The HTTPS URL matters: iOS only grants PWA install, the service worker, and clipboard in a secure context.
 
-## Start on boot
+## Start on boot (optional)
 
-Task Scheduler, run-at-logon:
+Nothing is installed to run at boot — after a reboot you start Sift yourself with
+`start_sift.bat`. `tailscale serve` persists its own config across reboots, so that batch
+file is the only step.
+
+To have it come up automatically instead, register it at logon:
 
 ```powershell
 schtasks /Create /TN "Sift" /TR "\"C:\Sift\start_sift.bat\"" /SC ONLOGON /RL LIMITED
