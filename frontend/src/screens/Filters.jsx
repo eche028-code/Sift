@@ -5,9 +5,9 @@ import { Busy, ErrorBox, Header } from "../components/bits";
 
 const RANGES = [
   { id: "1y", label: "1 yr", years: 1 },
+  { id: "3y", label: "3 yrs", years: 3 },
   { id: "5y", label: "5 yrs", years: 5 },
   { id: "10y", label: "10 yrs", years: 10 },
-  { id: "all", label: "All", years: null },
 ];
 
 const isoYearsAgo = (years) => {
@@ -19,14 +19,15 @@ const isoYearsAgo = (years) => {
 
 // Recover the range button from a stored date_from, so re-editing a search
 // (e.g. in the refine loop) keeps its window instead of resetting to 5 yrs.
+// Searches saved before the ranges changed may have no date_from at all
+// (the old "All" button); those land on the default rather than a dead id.
 const rangeFor = (search) => {
-  if (!search) return "5y";
-  if (!search.date_from) return search.stage === "new" ? "5y" : "all";
+  if (!search?.date_from) return "5y";
   const years = (Date.now() - new Date(search.date_from).getTime()) / 31557600000;
-  if (years <= 1.5) return "1y";
-  if (years <= 6) return "5y";
-  if (years <= 12) return "10y";
-  return "all";
+  if (years <= 2) return "1y";
+  if (years <= 4) return "3y";
+  if (years <= 7.5) return "5y";
+  return "10y";
 };
 
 const Toggle = ({ on, onClick, icon, children }) => (
