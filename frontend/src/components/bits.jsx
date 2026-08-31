@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, Check, ExternalLink, Eye, FileText, Layers, Maximize2, X,
+  AlertTriangle, ArrowLeft, Check, ExternalLink, Eye, FileText, HelpCircle, History,
+  Layers, Maximize2, Menu, Search, Settings, X,
 } from "lucide-react";
 import { gradeOf } from "../grade";
 
@@ -11,15 +12,83 @@ export const Wordmark = ({ size = "text-2xl" }) => (
   </span>
 );
 
-export const Header = ({ onBack, right }) => (
+export const Header = ({ onBack, menu, right }) => (
   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-    <button onClick={onBack} className="p-2 -ml-2 text-slate-400 active:text-slate-200" aria-label="Back">
-      <ArrowLeft size={20} />
-    </button>
+    {menu ?? (
+      <button onClick={onBack} className="p-2 -ml-2 text-slate-400 active:text-slate-200" aria-label="Back">
+        <ArrowLeft size={20} />
+      </button>
+    )}
     <Wordmark size="text-lg" />
     <div className="w-16 flex justify-end">{right}</div>
   </div>
 );
+
+export const GearButton = ({ onClick, className = "" }) => (
+  <button
+    onClick={onClick}
+    className={`p-2 -mr-2 text-slate-400 active:text-teal-300 ${className}`}
+    aria-label="Settings"
+  >
+    <Settings size={20} />
+  </button>
+);
+
+// The triple-bar drawer: the app's top-level pages, opposite the settings gear.
+const NAV_ITEMS = [
+  { id: "search", label: "New Search", Icon: Search },
+  { id: "topics", label: "Recent Search", Icon: History },
+  { id: "notes", label: "Library", Icon: FileText },
+  { id: "help", label: "How to use", Icon: HelpCircle },
+];
+
+export const NavMenu = ({ go, current, className = "" }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className={`p-2 -ml-2 text-slate-400 active:text-teal-300 ${className}`}
+        aria-label="Menu"
+      >
+        <Menu size={20} />
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex justify-center" onClick={() => setOpen(false)}>
+          {/* stay inside the phone column on wide screens, like the deck's expanded view */}
+          <div className="w-full max-w-md h-full relative">
+            <div className="absolute inset-0 bg-slate-950/70" />
+            <nav
+              className="absolute left-0 top-0 h-full w-64 bg-slate-900 border-r border-slate-800 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-5 pt-8 pb-6">
+                <Wordmark />
+              </div>
+              {NAV_ITEMS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    setOpen(false);
+                    if (id !== current) go(id);
+                  }}
+                  className={`flex items-center gap-3 px-5 py-3.5 text-left text-sm border-l-2 ${
+                    id === current
+                      ? "border-teal-500 bg-teal-950/40 text-teal-300"
+                      : "border-transparent text-slate-300 active:bg-slate-800"
+                  }`}
+                >
+                  <Icon size={16} className={id === current ? "text-teal-400" : "text-slate-500"} />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 export const PoolChip = ({ count, onClick }) => (
   <button

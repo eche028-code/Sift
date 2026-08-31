@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { api } from "../api";
-import { Busy, Header } from "../components/bits";
+import { Busy, GearButton, Header, NavMenu } from "../components/bits";
 
 export default function NotesList({ go }) {
   const [notes, setNotes] = useState(null);
@@ -18,7 +18,10 @@ export default function NotesList({ go }) {
 
   return (
     <>
-      <Header onBack={() => go("topics")} />
+      <Header
+        menu={<NavMenu go={go} current="notes" />}
+        right={<GearButton onClick={() => go("settings")} />}
+      />
       {notes === null ? (
         <Busy />
       ) : (

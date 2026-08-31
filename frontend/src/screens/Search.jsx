@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { api } from "../api";
-import { ErrorBox, Header } from "../components/bits";
+import { ErrorBox, GearButton, Header, NavMenu } from "../components/bits";
 
 const SAMPLES = [
   "Does IPL beat warm compresses for meibomian gland dysfunction?",
@@ -28,7 +28,10 @@ export default function Search({ go }) {
 
   return (
     <>
-      <Header onBack={() => go("topics")} />
+      <Header
+        menu={<NavMenu go={go} current="search" />}
+        right={<GearButton onClick={() => go("settings")} />}
+      />
       <div className="flex-1 flex flex-col px-5 pt-6 pb-8 gap-6">
         <div>
           <label className="font-mono text-xs uppercase tracking-wide text-slate-500">

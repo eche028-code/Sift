@@ -3,6 +3,7 @@ import { flushQueue } from "./api";
 import Deck from "./screens/Deck";
 import Detail from "./screens/Detail";
 import Filters from "./screens/Filters";
+import Help from "./screens/Help";
 import NotesList from "./screens/NotesList";
 import NoteView from "./screens/NoteView";
 import Pool from "./screens/Pool";
@@ -13,7 +14,7 @@ import Settings from "./screens/Settings";
 import Topics from "./screens/Topics";
 
 export default function App() {
-  const [nav, setNav] = useState({ screen: "topics" });
+  const [nav, setNav] = useState({ screen: "search" });
   const go = (screen, extra = {}) => setNav({ screen, ...extra });
 
   useEffect(() => {
@@ -41,6 +42,7 @@ export default function App() {
             noteId={nav.noteId} generate={nav.generate} backTo={nav.backTo} />
         )}
         {s === "notes" && <NotesList go={go} />}
+        {s === "help" && <Help go={go} />}
         {s === "settings" && <Settings go={go} />}
       </div>
     </div>

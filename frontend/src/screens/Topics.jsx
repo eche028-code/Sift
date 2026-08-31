@@ -4,7 +4,7 @@ import {
   Settings as SettingsIcon, Trash2,
 } from "lucide-react";
 import { api } from "../api";
-import { Busy, Wordmark } from "../components/bits";
+import { Busy, NavMenu, Wordmark } from "../components/bits";
 
 const RUNNING_STAGES = ["translating", "searching", "screening"];
 
@@ -99,8 +99,9 @@ export default function Topics({ go }) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-5 pt-8 pb-4 flex items-start justify-between">
-        <div>
+      <div className="px-5 pt-8 pb-4 flex items-start gap-2">
+        <NavMenu go={go} current="topics" className="mt-1" />
+        <div className="flex-1">
           <Wordmark />
           <p className="text-sm text-slate-400 mt-2">AI-screened papers, one card at a time.</p>
         </div>
