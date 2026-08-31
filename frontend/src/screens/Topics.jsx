@@ -11,7 +11,7 @@ const RUNNING_STAGES = ["translating", "searching", "screening"];
 const stageLine = (row) => {
   if (RUNNING_STAGES.includes(row.stage)) return "running — tap to watch";
   if (row.stage === "error") return "error — tap for details";
-  if (row.stage === "new") return "translated, not run yet";
+  if (row.stage === "new") return "converted, not run yet";
   if (row.stage === "fetched") {
     const n = row.stage_detail?.to_screen;
     return n > 0

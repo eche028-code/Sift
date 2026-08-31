@@ -27,14 +27,14 @@ First-time setup happens in the app, under **Settings** (gear icon):
 1. **Pick a provider** — DeepSeek, Moonshot, Anthropic, or Custom. The endpoint and a
    starting model name fill in; both stay editable. **Custom** covers anything else with an
    OpenAI-compatible `/v1` (OpenRouter, Groq, Ollama with a blank key, the mock below).
-2. **Paste the API key and name the model.** One model runs all three functions
-   (translator, triage, synthesis). **Test** pings it for latency; **Fetch models** lists
-   what the endpoint actually offers, so you do not have to guess a model ID.
+2. **Paste the API key and name the model.** One model runs all four functions
+   (query converter, clarifier, triage, synthesis). **Test** pings it for latency; **Fetch
+   models** lists what the endpoint actually offers, so you do not have to guess a model ID.
 3. **Contact email** — required for Unpaywall PDF lookup. PubMed itself needs no account,
    key or registration; searches go to the public E-utilities API at ~3 req/s.
-4. **Instructions** (optional) — per-function steering for translator, triage and synthesis.
-   Blank uses the built-in wording. The JSON reply contract is appended automatically and is
-   not editable, because the pipeline parses those keys.
+4. **Instructions** (optional) — per-function steering for the query converter, clarifier,
+   triage and synthesis. Blank uses the built-in wording. The JSON reply contract is appended
+   automatically and is not editable, because the pipeline parses those keys.
 
 Note on Anthropic: Sift talks to every provider over OpenAI-compatible chat-completions, and
 Anthropic's compatibility endpoint

@@ -77,7 +77,7 @@ export default function Search({ go }) {
           onClick={submit}
           className="mt-auto w-full rounded-xl bg-teal-500 text-slate-950 font-semibold py-4 disabled:opacity-30 active:bg-teal-400 inline-flex items-center justify-center gap-2"
         >
-          {busy ? "Translating…" : <>Screen the literature <ChevronRight size={18} /></>}
+          {busy ? "Converting…" : <>Screen the literature <ChevronRight size={18} /></>}
         </button>
       </div>
     </>

@@ -55,7 +55,7 @@ export default function Scanning({ go, searchId }) {
         },
       ]
     : [
-        { label: "Translating natural language → PubMed syntax", state: "done" },
+        { label: "Converting natural language → PubMed syntax", state: "done" },
         {
           label: "Querying PubMed" + (d.found != null ? ` — ${d.found} records` : ""),
           state: stage === "searching" ? "active" : stage === "fetched" ? "done" : "todo",

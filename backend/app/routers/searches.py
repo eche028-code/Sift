@@ -115,15 +115,16 @@ async def _llm_json(role: str, system: str, user: str, temperature: float, failu
 
 
 async def _translate(system: str, user: str, failure: str) -> tuple[str, str, str]:
-    """A translator round: (pubmed_query, rationale, refined_question).
+    """A query-converter round: (pubmed_query, rationale, refined_question).
 
     create/refine/clarify differ only in the prompt they send, the error wording,
-    and which of these three fields they go on to persist.
+    and which of these three fields they go on to persist. The role string is the
+    display name used in error text; the stored settings key stays prompt_translator.
     """
-    parsed = await _llm_json("translator", system, user, 0.0, failure)
+    parsed = await _llm_json("query converter", system, user, 0.0, failure)
     translated = str(parsed.get("pubmed_query") or "").strip()
     if not translated:
-        raise HTTPException(502, f"{failure}: translator returned no pubmed_query")
+        raise HTTPException(502, f"{failure}: query converter returned no pubmed_query")
     return (
         translated,
         str(parsed.get("rationale") or "").strip(),
@@ -164,7 +165,7 @@ async def create_search(body: SearchCreate) -> dict:
         s.refresh(search)
     try:
         translated, rationale, _refined = await _translate(
-            prompts.translator_system(), raw, "translation failed"
+            prompts.translator_system(), raw, "query conversion failed"
         )
     except HTTPException:
         with session() as s:  # a search with no query is useless — don't leave it behind
@@ -209,7 +210,7 @@ def patch_search(search_id: int, body: SearchPatch) -> dict:
             if key in ("pdf_only", "is_saved"):
                 value = int(bool(value))
             if key == "translated_query" and (value or "").strip() == "":
-                raise HTTPException(400, "translated query cannot be empty")
+                raise HTTPException(400, "the PubMed query cannot be empty")
             setattr(search, key, value)
         s.add(search)
         s.commit()
@@ -242,7 +243,7 @@ async def run_search(search_id: int) -> dict:
         if search is None:
             raise HTTPException(404, "search not found")
         if not (search.translated_query or "").strip():
-            raise HTTPException(400, "no translated query — translate first")
+            raise HTTPException(400, "no PubMed query yet — convert the question first")
     if search_id in RUNNING:
         raise HTTPException(409, "already running")
     start_pipeline_task(search_id, "fetch")

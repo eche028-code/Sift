@@ -12,7 +12,8 @@ const PROVIDERS = [
 ];
 
 const FUNCTIONS = [
-  { key: "translator", label: "Translator", hint: "turns your question into a PubMed query" },
+  // `key` is the stored settings key (prompt_translator) — the label is display only.
+  { key: "translator", label: "Query Converter", hint: "turns your question into a PubMed query" },
   { key: "clarifier", label: "Clarifier", hint: "asks narrowing questions when a fetch is too broad" },
   { key: "triage", label: "Triage", hint: "screens and grades every abstract" },
   { key: "synthesis", label: "Synthesis", hint: "writes the evidence note" },
@@ -289,7 +290,7 @@ export default function Settings({ go }) {
               )}
 
               <p className="text-xs text-slate-600">
-                One model runs the translator, clarifier, triage and synthesis. Steer each separately below.
+                One model runs the query converter, clarifier, triage and synthesis. Steer each separately below.
               </p>
             </section>
           </div>
