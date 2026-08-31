@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlmodel import func, select
 
 from .. import llm, prompts
+from .. import settings_store as st
 from ..db import session
 from ..models import Note, Paper, Search, SearchResult, Triage
 from ..pipeline import RUNNING, _screening_workload, start_pipeline_task
@@ -20,6 +21,16 @@ def _detail(search: Search) -> dict:
         return json.loads(search.stage_detail)
     except ValueError:
         return {}
+
+
+def _clarifications(search: Search) -> list[dict]:
+    if not search.clarifications:
+        return []
+    try:
+        parsed = json.loads(search.clarifications)
+        return parsed if isinstance(parsed, list) else []
+    except ValueError:
+        return []
 
 
 def _counts(s, search_id: int) -> dict:
@@ -57,6 +68,8 @@ def _search_out(s, search: Search) -> dict:
         "is_saved": bool(search.is_saved),
         "stage": search.stage,
         "stage_detail": _detail(search),
+        "clarifications": _clarifications(search),
+        "refined_question": search.refined_question,
         "created_at": search.created_at,
         "counts": _counts(s, search.id),
     }
@@ -270,6 +283,7 @@ def search_results(search_id: int) -> dict:
                 "to_screen": to_screen,
                 "already_triaged": len(papers) - to_screen,
                 "prior_relevant": sum(1 for x in papers if x["relevant"]),
+                "clarify_threshold": st.get_int("clarify_threshold", 30),
             },
         }
 
@@ -278,14 +292,8 @@ class RefineBody(BaseModel):
     instruction: str
 
 
-@router.post("/{search_id}/refine")
-async def refine_search(search_id: int, body: RefineBody) -> dict:
-    """Revise the PubMed query with the LLM, steered by what the current query returned."""
-    instruction = body.instruction.strip()
-    if not instruction:
-        raise HTTPException(400, "instruction is empty")
-    if search_id in RUNNING:
-        raise HTTPException(409, "search is running — wait for it to finish")
+def _revision_context(search_id: int) -> tuple[str, str, int | None, list[str], list[dict]]:
+    """(raw_query, current_query, found, sample_titles, clarifications) for query-revision calls."""
     with session() as s:
         search = s.get(Search, search_id)
         if search is None:
@@ -297,13 +305,29 @@ async def refine_search(search_id: int, body: RefineBody) -> dict:
             .order_by(Paper.year.desc())  # type: ignore[union-attr]
             .limit(12)
         ).all())
-        found = _detail(search).get("found")
-        raw_query, current_query = search.raw_query, search.translated_query
+        return (
+            search.raw_query,
+            search.translated_query or "",
+            _detail(search).get("found"),
+            titles,
+            _clarifications(search),
+        )
+
+
+@router.post("/{search_id}/refine")
+async def refine_search(search_id: int, body: RefineBody) -> dict:
+    """Revise the PubMed query with the LLM, steered by what the current query returned."""
+    instruction = body.instruction.strip()
+    if not instruction:
+        raise HTTPException(400, "instruction is empty")
+    if search_id in RUNNING:
+        raise HTTPException(409, "search is running — wait for it to finish")
+    raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
     try:
         reply = await llm.chat(
             "translator",
             prompts.translator_system(),
-            prompts.refine_user(raw_query, current_query or "", found, titles, instruction),
+            prompts.refine_user(raw_query, current_query, found, titles, instruction, clarifications),
             temperature=0.0,
         )
         parsed = llm.extract_json(reply)
@@ -320,6 +344,95 @@ async def refine_search(search_id: int, body: RefineBody) -> dict:
         if fresh is None:
             raise HTTPException(404, "search not found")
         fresh.translated_query = translated
+        detail = _detail(fresh)
+        detail["rationale"] = rationale
+        fresh.stage_detail = json.dumps(detail)
+        s.add(fresh)
+        s.commit()
+        return _search_out(s, fresh)
+
+
+@router.post("/{search_id}/clarify/questions")
+async def clarify_questions(search_id: int) -> dict:
+    """Ask round: the clarifier proposes narrowing questions from what the fetch returned.
+
+    Costs one small LLM call — only ever fired by an explicit tap on the nudge.
+    """
+    if search_id in RUNNING:
+        raise HTTPException(409, "search is running — wait for it to finish")
+    raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
+    try:
+        reply = await llm.chat(
+            "clarifier",
+            prompts.clarifier_system(),
+            prompts.clarify_questions_user(raw_query, current_query, found, titles, clarifications),
+            temperature=0.2,
+        )
+        parsed = llm.extract_json(reply)
+    except llm.LLMNotConfigured as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"clarifier failed: {e}")
+    questions = []
+    for q in (parsed.get("clarify_questions") or [])[:3]:  # the cap is code-enforced
+        if not isinstance(q, dict):
+            continue
+        text = str(q.get("text") or "").strip()
+        if not text:
+            continue
+        options = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:5]
+        questions.append({"text": text, "options": options})
+    return {"questions": questions}
+
+
+class QA(BaseModel):
+    question: str
+    answer: str
+
+
+class ClarifyBody(BaseModel):
+    answers: list[QA]
+
+
+@router.post("/{search_id}/clarify")
+async def clarify_search(search_id: int, body: ClarifyBody) -> dict:
+    """Answer round: fold the clarifying answers into a narrower query + refined question."""
+    answers = [
+        {"question": a.question.strip(), "answer": a.answer.strip()}
+        for a in body.answers
+        if a.answer.strip()
+    ]
+    if not answers:
+        raise HTTPException(400, "no answers given")
+    if search_id in RUNNING:
+        raise HTTPException(409, "search is running — wait for it to finish")
+    raw_query, current_query, found, titles, prior = _revision_context(search_id)
+    combined = prior + answers
+    try:
+        reply = await llm.chat(
+            "translator",
+            prompts.clarified_translator_system(),
+            prompts.clarify_answers_user(raw_query, current_query, found, titles, combined),
+            temperature=0.0,
+        )
+        parsed = llm.extract_json(reply)
+        translated = str(parsed.get("pubmed_query") or "").strip()
+        if not translated:
+            raise ValueError("translator returned no pubmed_query")
+        refined = str(parsed.get("refined_question") or "").strip()
+        rationale = str(parsed.get("rationale") or "").strip()
+    except llm.LLMNotConfigured as e:
+        raise HTTPException(409, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"clarification failed: {e}")
+    with session() as s:
+        fresh = s.get(Search, search_id)
+        if fresh is None:
+            raise HTTPException(404, "search not found")
+        fresh.translated_query = translated
+        fresh.clarifications = json.dumps(combined, ensure_ascii=False)
+        if refined:
+            fresh.refined_question = refined
         detail = _detail(fresh)
         detail["rationale"] = rationale
         fresh.stage_detail = json.dumps(detail)

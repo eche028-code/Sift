@@ -10,6 +10,10 @@ DEFAULT_TRANSLATOR = """- Group synonyms with OR inside parentheses; combine dis
 - Use field tags where they help: [MeSH Terms], [tiab]. Prefer recall over precision — downstream AI screening removes noise.
 - Do NOT add date restrictions or availability filters (free full text, language); those are applied separately."""
 
+DEFAULT_CLARIFIER = """- Narrow along whichever axes matter most here: population and age, intervention specifics, comparator, outcome measure, study design, setting.
+- Make the options concrete from the sample titles — name the interventions, populations, and outcomes that actually appear in them.
+- Do NOT ask about publication dates or full-text availability; those are separate filters."""
+
 DEFAULT_TRIAGE = """Score 0-100 for evidence quality: study design first (meta-analysis and RCT high; prospective cohort middle; retrospective and cross-sectional lower; case series and surveys low), then sample size, follow-up length, masking, and registration or pre-specification of outcomes."""
 
 DEFAULT_SYNTHESIS = """- One opening sentence with the counts you are given (screened / passed triage / kept).
@@ -19,6 +23,7 @@ DEFAULT_SYNTHESIS = """- One opening sentence with the counts you are given (scr
 
 DEFAULT_PROMPTS = {
     "translator": DEFAULT_TRANSLATOR,
+    "clarifier": DEFAULT_CLARIFIER,
     "triage": DEFAULT_TRIAGE,
     "synthesis": DEFAULT_SYNTHESIS,
 }
@@ -39,14 +44,13 @@ def translator_system() -> str:
     ])
 
 
-def refine_user(
+def _context_lines(
     raw_query: str,
     current_query: str,
     found: int | None,
     sample_titles: list[str],
-    instruction: str,
-) -> str:
-    """User message asking the translator to revise an existing query."""
+) -> list[str]:
+    """The shared preamble: what was asked, what ran, what came back."""
     parts = [
         f'The clinician originally asked: "{raw_query}"',
         "",
@@ -58,10 +62,92 @@ def refine_user(
     if sample_titles:
         parts += ["", "A sample of the titles it returned:"]
         parts += [f"- {t}" for t in sample_titles]
+    return parts
+
+
+def _qa_lines(clarifications: list[dict], intro: str) -> list[str]:
+    qa = [c for c in clarifications or [] if c.get("answer")]
+    if not qa:
+        return []
+    return ["", intro] + [f'- {c.get("question", "?")} → {c["answer"]}' for c in qa]
+
+
+def refine_user(
+    raw_query: str,
+    current_query: str,
+    found: int | None,
+    sample_titles: list[str],
+    instruction: str,
+    clarifications: list[dict] | None = None,
+) -> str:
+    """User message asking the translator to revise an existing query."""
+    parts = _context_lines(raw_query, current_query, found, sample_titles)
+    parts += _qa_lines(
+        clarifications or [],
+        "The clinician has already clarified (keep the query narrowed accordingly):",
+    )
     parts += [
         "",
         f"Revise the query according to this instruction from the clinician: {instruction}",
         "Keep what still fits the original question; change only what the instruction requires.",
+    ]
+    return "\n".join(parts)
+
+
+def clarifier_system() -> str:
+    return "\n".join([
+        "A clinician's PubMed search came back too broad to screen. "
+        "You ask the few clarifying questions whose answers would best narrow it.",
+        "",
+        "Rules:",
+        steer("clarifier"),
+        "- Ask 1 to 3 questions, each with 2 to 4 options: short tappable answer phrases, not sentences.",
+        "- Only ask what the results actually leave ambiguous. If the query is already as narrow "
+        "as the question allows, return an empty list.",
+        '- Reply with JSON only, no prose: {"clarify_questions": [{"text": "...", "options": ["...", "..."]}]}',
+    ])
+
+
+def clarify_questions_user(
+    raw_query: str,
+    current_query: str,
+    found: int | None,
+    sample_titles: list[str],
+    clarifications: list[dict],
+) -> str:
+    """User message for the ask round: generate narrowing questions."""
+    parts = _context_lines(raw_query, current_query, found, sample_titles)
+    parts += _qa_lines(clarifications, "Already clarified earlier — do not ask about these again:")
+    parts += ["", "Ask the clarifying questions that would most effectively narrow this down."]
+    return "\n".join(parts)
+
+
+def clarified_translator_system() -> str:
+    return "\n".join([
+        "You convert a clinician's natural-language question into a single PubMed search query.",
+        "The clinician has answered clarifying questions — fold their answers into a narrower query.",
+        "",
+        "Rules:",
+        steer("translator"),
+        '- Reply with JSON only, no prose: {"pubmed_query": "...", '
+        '"refined_question": "the clinician\'s question restated in one sentence with the clarified details folded in", '
+        '"rationale": "one short sentence on what changed"}',
+    ])
+
+
+def clarify_answers_user(
+    raw_query: str,
+    current_query: str,
+    found: int | None,
+    sample_titles: list[str],
+    clarifications: list[dict],
+) -> str:
+    """User message for the answer round: rebuild the query from the accumulated Q&A."""
+    parts = _context_lines(raw_query, current_query, found, sample_titles)
+    parts += _qa_lines(clarifications, "Their answers to the clarifying questions:")
+    parts += [
+        "",
+        "Rewrite the query so it reflects every answer. Keep what still fits the original question.",
     ]
     return "\n".join(parts)
 

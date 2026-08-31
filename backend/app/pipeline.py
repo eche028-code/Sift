@@ -335,7 +335,8 @@ async def _run_screen_inner(search_id: int) -> dict:
 
         if todo:
             _label, _url, _key, model_name = llm.resolve_model()
-            system = prompts.triage_system(search.raw_query, search.translated_query, recent_feedback())
+            question = search.refined_question or search.raw_query
+            system = prompts.triage_system(question, search.translated_query, recent_feedback())
             sem = asyncio.Semaphore(TRIAGE_CONCURRENCY)
             screened = 0
 

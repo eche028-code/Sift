@@ -13,6 +13,7 @@ const PROVIDERS = [
 
 const FUNCTIONS = [
   { key: "translator", label: "Translator", hint: "turns your question into a PubMed query" },
+  { key: "clarifier", label: "Clarifier", hint: "asks narrowing questions when a fetch is too broad" },
   { key: "triage", label: "Triage", hint: "screens and grades every abstract" },
   { key: "synthesis", label: "Synthesis", hint: "writes the evidence note" },
 ];
@@ -80,10 +81,12 @@ export default function Settings({ go }) {
       llm_base_url: settings.llm_base_url,
       llm_model: settings.llm_model,
       prompt_translator: settings.prompt_translator,
+      prompt_clarifier: settings.prompt_clarifier,
       prompt_triage: settings.prompt_triage,
       prompt_synthesis: settings.prompt_synthesis,
       contact_email: settings.contact_email,
       user_profile: settings.user_profile,
+      clarify_threshold: settings.clarify_threshold,
     };
     if (apiKey.trim()) body.llm_api_key = apiKey.trim(); // omitted → server keeps the stored key
     const next = await api.putSettings(body).catch((e) => (window.alert(e.message), null));
@@ -146,7 +149,7 @@ export default function Settings({ go }) {
             <ReadyCard
               ok={ready.model}
               label={ready.model ? `${settings.llm_provider || "Model"} · ${settings.llm_model}` : "No model"}
-              detail={ready.model ? "used for all three functions" : "pick a provider and enter a model"}
+              detail={ready.model ? "used for all four functions" : "pick a provider and enter a model"}
             />
             <ReadyCard
               ok={ready.key}
@@ -279,14 +282,14 @@ export default function Settings({ go }) {
                 <p className="flex items-start gap-2 text-xs text-amber-300 bg-amber-950/20 border border-amber-900 rounded-lg px-3 py-2">
                   <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                   <span className="leading-snug">
-                    Anthropic's OpenAI-compatible endpoint ignores JSON mode, so triage relies on the model
-                    following the instructions below. Keep the "reply with JSON only" wording if you edit them.
+                    Anthropic's OpenAI-compatible endpoint ignores JSON mode, so every function relies on the
+                    model following the instructions below. Keep the "reply with JSON only" wording if you edit them.
                   </span>
                 </p>
               )}
 
               <p className="text-xs text-slate-600">
-                One model runs the translator, triage and synthesis. Steer each separately below.
+                One model runs the translator, clarifier, triage and synthesis. Steer each separately below.
               </p>
             </section>
           </div>
@@ -309,6 +312,28 @@ export default function Settings({ go }) {
               </div>
             </section>
 
+            {/* ── screening flow ── */}
+            <section className="flex flex-col gap-4">
+              <Label>Screening</Label>
+              <div>
+                <p className="text-xs text-slate-500 mb-1.5">
+                  Suggest narrowing questions when a fetch would screen more new abstracts than
+                </p>
+                <input
+                  className={`${inputCls} font-mono`}
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  value={settings.clarify_threshold}
+                  onChange={set("clarify_threshold")}
+                  placeholder="30"
+                />
+                <p className="text-xs text-slate-600 mt-1.5">
+                  0 suggests every time. You can always tap "screen anyway" — this is a nudge, not a limit.
+                </p>
+              </div>
+            </section>
+
           </div>
         </div>
 
@@ -319,7 +344,7 @@ export default function Settings({ go }) {
             How each function should handle its job. Blank uses the built-in wording. The JSON reply
             format is added automatically and is not editable — the pipeline parses it.
           </p>
-          <div className="flex flex-col gap-3 lg:grid lg:grid-cols-3 lg:gap-4">
+          <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
             {FUNCTIONS.map((f) => {
               const field = `prompt_${f.key}`;
               const custom = Boolean(settings[field]?.trim());

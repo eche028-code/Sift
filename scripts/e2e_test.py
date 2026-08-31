@@ -1,7 +1,7 @@
 """End-to-end pipeline test against a running server (port 8000) + mock LLM (port 9099).
 
 Exercises: model config, per-function instructions, translate, real PubMed search/fetch,
-dedupe, enrich, mock triage, ranking, deck, decisions, undo, pool, synthesis, notes.
+dedupe, clarify loop, enrich, mock triage, ranking, deck, decisions, undo, pool, synthesis, notes.
 
 It writes to whatever database the target server uses, so point it at a scratch
 instance rather than your own: set SIFT_DATA_DIR for that server, and SIFT_TEST_BASE here.
@@ -54,7 +54,8 @@ def main() -> int:
 
     # editable per-function instructions
     r = c.get("/api/settings/prompt-defaults")
-    check("prompt defaults", r.status_code == 200 and set(r.json()) == {"translator", "triage", "synthesis"})
+    check("prompt defaults", r.status_code == 200
+          and set(r.json()) == {"translator", "clarifier", "triage", "synthesis"})
     r = c.put("/api/settings", json={"prompt_triage": "Favour randomised trials."})
     check("custom instruction saved", r.json()["prompt_triage"] == "Favour randomised trials.")
     r = c.put("/api/settings", json={"prompt_triage": ""})
@@ -99,9 +100,35 @@ def main() -> int:
           and res["summary"]["total"] == len(res["papers"]), str(res["summary"]))
     check("results papers untriaged", all(p["triaged"] is False for p in res["papers"]))
 
+    # clarify loop: threshold → questions → answers narrow the query, then re-fetch
+    r = c.put("/api/settings", json={"clarify_threshold": 1})
+    check("clarify threshold saved", r.status_code == 200 and r.json()["clarify_threshold"] == "1")
+    r = c.get(f"/api/searches/{sid}/results")
+    check("results expose threshold", r.json()["summary"].get("clarify_threshold") == 1)
+    r = c.post(f"/api/searches/{sid}/clarify/questions")
+    qs = r.json().get("questions", []) if r.status_code == 200 else []
+    check("clarify questions", r.status_code == 200 and len(qs) >= 1 and qs[0]["options"], str(qs)[:80])
+    r = c.post(f"/api/searches/{sid}/clarify", json={"answers": [
+        {"question": qs[0]["text"], "answer": qs[0]["options"][0]},
+        {"question": "Which outcome should the papers report?", "answer": "Axial length"},
+    ]})
+    body = r.json()
+    check("clarify answers → narrower query", r.status_code == 200
+          and "child" in (body.get("translated_query") or "").lower(), str(body)[:80])
+    check("refined question stored", bool(body.get("refined_question")))
+    check("clarifications accumulated", len(body.get("clarifications") or []) == 2)
+    r = c.post(f"/api/searches/{sid}/clarify", json={"answers": [{"question": "x", "answer": "  "}]})
+    check("blank answers rejected", r.status_code == 400)
+    r = c.post(f"/api/searches/{sid}/run")
+    check("re-run after clarify", r.status_code == 200)
+    stage, detail = wait_for(("fetched",))
+    check("clarified re-fetch reaches 'fetched'", stage == "fetched", f"stage={stage}")
+    c.put("/api/settings", json={"clarify_threshold": 30})
+
     # refine the query, then re-fetch
     r = c.post(f"/api/searches/{sid}/refine", json={"instruction": "only randomised trials in children"})
     check("POST refine", r.status_code == 200 and bool(r.json().get("translated_query")), str(r.json())[:80])
+    check("clarifications survive refine", len(r.json().get("clarifications") or []) == 2)
     r = c.post(f"/api/searches/{sid}/run")
     check("re-run after refine", r.status_code == 200)
     stage, detail = wait_for(("fetched",))

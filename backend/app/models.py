@@ -24,6 +24,8 @@ class Search(SQLModel, table=True):
     is_saved: int = 0
     stage: str = "new"  # new|translating|searching|fetched|screening|ready|error
     stage_detail: str | None = None  # JSON
+    clarifications: str | None = None  # JSON [{"question": ..., "answer": ...}], accumulated
+    refined_question: str | None = None  # raw_query restated with the clarified details folded in
     created_at: str = Field(default_factory=utcnow)
 
 

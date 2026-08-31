@@ -8,6 +8,9 @@ from .models import Setting
 DEFAULTS: dict[str, str] = {
     "contact_email": "",
     "record_cap": "200",
+    # Nudge toward clarifying questions when a fetch would screen more new
+    # abstracts than this. 0 nudges every time; raise it to nudge less often.
+    "clarify_threshold": "30",
     "user_profile": (
         "An optometrist focused on myopia control, orthokeratology, "
         "and anterior segment disease. Reads to guide clinical decisions."
@@ -19,6 +22,7 @@ DEFAULTS: dict[str, str] = {
     "llm_model": "",
     # Per-function steering. Blank means "use the built-in instructions".
     "prompt_translator": "",
+    "prompt_clarifier": "",
     "prompt_triage": "",
     "prompt_synthesis": "",
 }

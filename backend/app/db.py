@@ -41,4 +41,9 @@ def _migrate() -> None:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(papers)")}
         if "pmcid" not in cols:
             conn.exec_driver_sql("ALTER TABLE papers ADD COLUMN pmcid TEXT")
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(searches)")}
+        if "clarifications" not in cols:
+            conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN clarifications TEXT")
+        if "refined_question" not in cols:
+            conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN refined_question TEXT")
         conn.commit()

@@ -63,7 +63,7 @@ async def synthesise(search_id: int) -> Note:
     }
     body = await llm.chat(
         "synthesis",
-        prompts.synthesis_system(search.raw_query),
+        prompts.synthesis_system(search.refined_question or search.raw_query),
         prompts.synthesis_user(counts, papers_payload),
         temperature=0.4,
         force_json=False,

@@ -31,6 +31,35 @@ def translator_reply(user: str) -> str:
     )
 
 
+def clarifier_reply(user: str) -> str:
+    return json.dumps(
+        {
+            "clarify_questions": [
+                {
+                    "text": "Which age group matters most?",
+                    "options": ["Children under 12", "Teenagers", "Adults", "Any age"],
+                },
+                {
+                    "text": "Which outcome should the papers report?",
+                    "options": ["Axial length", "Refractive error", "Either"],
+                },
+            ]
+        }
+    )
+
+
+def clarified_translator_reply(user: str) -> str:
+    return json.dumps(
+        {
+            "pubmed_query": '("orthokeratology"[MeSH Terms] OR ortho-k[tiab]) '
+            'AND ("axial length"[tiab] OR elongation[tiab]) AND ("child"[MeSH Terms] OR children[tiab])',
+            "refined_question": "Does orthokeratology slow axial elongation, measured as axial length, "
+            "in children under 12?",
+            "rationale": "Narrowed to children and axial-length outcomes per the answers.",
+        }
+    )
+
+
 def triage_reply(user: str) -> str:
     title = user.split("\n", 1)[0].removeprefix("TITLE:").strip()
     seed = h(title)
@@ -88,7 +117,12 @@ async def chat(request: Request):
         elif m["role"] == "user":
             user = m["content"]
 
-    if "pubmed_query" in system:
+    # Order matters: the clarify-answers system contains "pubmed_query" too.
+    if "clarify_questions" in system:
+        content = clarifier_reply(user)
+    elif "refined_question" in system:
+        content = clarified_translator_reply(user)
+    elif "pubmed_query" in system:
         content = translator_reply(user)
     elif '"relevant"' in system:
         content = triage_reply(user)
