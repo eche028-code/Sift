@@ -17,6 +17,7 @@ class LLMError(Exception):
 
 
 _clients: dict[tuple[str, str], AsyncOpenAI] = {}
+_attempt_start: dict[tuple[str, str, bool, bool], int] = {}  # first accepted attempt per call shape
 
 
 def _client(base_url: str, api_key: str) -> AsyncOpenAI:
@@ -69,10 +70,17 @@ async def chat(
         attempts.append({**base, "response_format": {"type": "json_object"}})
     attempts.append(base)
 
+    # Start from the attempt shape this endpoint+model last accepted, so a provider
+    # that rejects a param (kimi-k3 400s anything with temperature) eats the failed
+    # probes once, not on every single call.
+    shape_key = (base_url, model, temperature is not None, force_json)
+    start = min(_attempt_start.get(shape_key, 0), len(attempts) - 1)
+
     last_err: Exception | None = None
-    for kwargs in attempts:
+    for i in range(start, len(attempts)):
         try:
-            resp = await client.chat.completions.create(**kwargs)
+            resp = await client.chat.completions.create(**attempts[i])
+            _attempt_start[shape_key] = i
             return resp.choices[0].message.content or ""
         except BadRequestError as e:
             last_err = e  # provider rejected a param — try a plainer request

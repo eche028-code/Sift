@@ -1,12 +1,16 @@
 """Pool → evidence note."""
 
 import json
+import logging
 
 from sqlmodel import select
 
 from . import llm, prompts
 from .db import session
 from .models import Note, Paper, Search, SearchResult, Triage
+from .pipeline import RUNNING, set_stage
+
+log = logging.getLogger("sift.synthesis")
 
 
 def grade_label(score: int | None) -> str:
@@ -18,6 +22,30 @@ def grade_label(score: int | None) -> str:
     if s >= 50:
         return "Limited"
     return "Weak"
+
+
+async def run_synthesis_task(search_id: int) -> None:
+    """Synthesis as a background task — the model call is too slow to hold a phone request.
+
+    Progress rides in stage_detail (synthesis_status/synthesis_note_id/synthesis_error);
+    the stage itself is untouched so the deck stays usable throughout.
+    """
+    if search_id in RUNNING:
+        raise RuntimeError("already running")
+    RUNNING.add(search_id)
+    try:
+        set_stage(search_id, synthesis_status="running", synthesis_note_id=None,
+                  synthesis_error=None)
+        try:
+            note = await synthesise(search_id)
+        except Exception as e:
+            log.exception("synthesis failed for search %s", search_id)
+            set_stage(search_id, synthesis_status="error",
+                      synthesis_error=f"synthesis failed: {e}"[:300])
+            return
+        set_stage(search_id, synthesis_status="done", synthesis_note_id=note.id)
+    finally:
+        RUNNING.discard(search_id)
 
 
 async def synthesise(search_id: int) -> Note:

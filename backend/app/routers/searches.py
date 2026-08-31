@@ -4,12 +4,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlmodel import func, select
 
-from .. import llm, prompts
+from .. import llm
 from .. import settings_store as st
 from ..db import session
 from ..models import Note, Paper, Search, SearchResult, Triage
-from ..pipeline import RUNNING, _screening_workload, start_pipeline_task
-from ..synthesis import synthesise as run_synthesis
+from ..pipeline import (
+    RUNNING, _screening_workload, run_clarify_questions, run_revision,
+    run_translate, start_pipeline_task, start_task,
+)
+from ..synthesis import run_synthesis_task
 
 router = APIRouter(prefix="/api/searches", tags=["searches"])
 
@@ -103,76 +106,28 @@ def card(paper: Paper, triage: Triage, sr: SearchResult) -> dict:
     }
 
 
-async def _llm_json(role: str, system: str, user: str, temperature: float, failure: str) -> dict:
-    """One LLM round-trip parsed as JSON, with the error mapping every endpoint here shares."""
-    try:
-        reply = await llm.chat(role, system, user, temperature=temperature)
-        return llm.extract_json(reply)
-    except llm.LLMNotConfigured as e:
-        raise HTTPException(409, str(e))
-    except Exception as e:
-        raise HTTPException(502, f"{failure}: {e}")
-
-
-async def _translate(system: str, user: str, failure: str) -> tuple[str, str, str]:
-    """A query-converter round: (pubmed_query, rationale, refined_question).
-
-    create/refine/clarify differ only in the prompt they send, the error wording,
-    and which of these three fields they go on to persist. The role string is the
-    display name used in error text; the stored settings key stays prompt_translator.
-    """
-    parsed = await _llm_json("query converter", system, user, 0.0, failure)
-    translated = str(parsed.get("pubmed_query") or "").strip()
-    if not translated:
-        raise HTTPException(502, f"{failure}: query converter returned no pubmed_query")
-    return (
-        translated,
-        str(parsed.get("rationale") or "").strip(),
-        str(parsed.get("refined_question") or "").strip(),
-    )
-
-
-def _apply_translation(search_id: int, translated: str, rationale: str, **fields) -> dict:
-    """Persist a new query (plus any extra columns) and merge the rationale into stage_detail."""
-    with session() as s:
-        fresh = s.get(Search, search_id)
-        if fresh is None:
-            raise HTTPException(404, "search not found")
-        fresh.translated_query = translated
-        for key, value in fields.items():
-            setattr(fresh, key, value)
-        detail = _detail(fresh)
-        detail["rationale"] = rationale
-        fresh.stage_detail = json.dumps(detail)
-        s.add(fresh)
-        s.commit()
-        return _search_out(s, fresh)
-
-
 class SearchCreate(BaseModel):
     raw_query: str
 
 
 @router.post("")
 async def create_search(body: SearchCreate) -> dict:
+    """Create the search and convert the question as a task — the client watches the stage."""
     raw = body.raw_query.strip()
     if not raw:
         raise HTTPException(400, "query is empty")
+    try:  # fail fast so the Search screen can offer Settings before a row exists
+        llm.resolve_model()
+    except llm.LLMNotConfigured as e:
+        raise HTTPException(409, str(e))
     search = Search(raw_query=raw, stage="translating")
     with session() as s:
         s.add(search)
         s.commit()
         s.refresh(search)
-    try:
-        translated, rationale, _refined = await _translate(
-            prompts.translator_system(), raw, "query conversion failed"
-        )
-    except HTTPException:
-        with session() as s:  # a search with no query is useless — don't leave it behind
-            s.delete(s.get(Search, search.id))
-            s.commit()
-        raise
-    return _apply_translation(search.id, translated, rationale, stage="new")
+        out = _search_out(s, search)
+    start_task(run_translate(search.id))
+    return out
 
 
 @router.get("")
@@ -323,71 +278,42 @@ class RefineBody(BaseModel):
     instruction: str
 
 
-def _revision_context(search_id: int) -> tuple[str, str, int | None, list[str], list[dict]]:
-    """(raw_query, current_query, found, sample_titles, clarifications) for query-revision calls."""
+def _guard_revision(search_id: int) -> None:
+    """Shared preflight for the slow LLM revision endpoints (which run as tasks)."""
     with session() as s:
-        search = s.get(Search, search_id)
-        if search is None:
+        if s.get(Search, search_id) is None:
             raise HTTPException(404, "search not found")
-        titles = list(s.exec(
-            select(Paper.title)
-            .join(SearchResult, SearchResult.paper_id == Paper.id)
-            .where(SearchResult.search_id == search_id)
-            .order_by(Paper.year.desc())  # type: ignore[union-attr]
-            .limit(12)
-        ).all())
-        return (
-            search.raw_query,
-            search.translated_query or "",
-            _detail(search).get("found"),
-            titles,
-            _clarifications(search),
-        )
+    if search_id in RUNNING:
+        raise HTTPException(409, "search is running — wait for it to finish")
+    try:
+        llm.resolve_model()
+    except llm.LLMNotConfigured as e:
+        raise HTTPException(409, str(e))
 
 
 @router.post("/{search_id}/refine")
 async def refine_search(search_id: int, body: RefineBody) -> dict:
-    """Revise the PubMed query with the LLM, steered by what the current query returned."""
+    """Revise the query with the LLM, then re-fetch — as a background task the client polls.
+
+    Thinking models take 45-80s per revision; a phone won't hold a request that long.
+    """
     instruction = body.instruction.strip()
     if not instruction:
         raise HTTPException(400, "instruction is empty")
-    if search_id in RUNNING:
-        raise HTTPException(409, "search is running — wait for it to finish")
-    raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
-    translated, rationale, _refined = await _translate(
-        prompts.translator_system(),
-        prompts.refine_user(raw_query, current_query, found, titles, instruction, clarifications),
-        "refinement failed",
-    )
-    return _apply_translation(search_id, translated, rationale)
+    _guard_revision(search_id)
+    start_task(run_revision(search_id, "refine", instruction))
+    return {"started": True}
 
 
 @router.post("/{search_id}/clarify/questions")
 async def clarify_questions(search_id: int) -> dict:
-    """Ask round: the clarifier proposes narrowing questions from what the fetch returned.
+    """Ask round: start the clarifier task; the questions land in stage_detail for polling.
 
     Costs one small LLM call — only ever fired by an explicit tap on the nudge.
     """
-    if search_id in RUNNING:
-        raise HTTPException(409, "search is running — wait for it to finish")
-    raw_query, current_query, found, titles, clarifications = _revision_context(search_id)
-    parsed = await _llm_json(
-        "clarifier",
-        prompts.clarifier_system(),
-        prompts.clarify_questions_user(raw_query, current_query, found, titles, clarifications),
-        0.2,
-        "clarifier failed",
-    )
-    questions = []
-    for q in (parsed.get("clarify_questions") or [])[:3]:  # the cap is code-enforced
-        if not isinstance(q, dict):
-            continue
-        text = str(q.get("text") or "").strip()
-        if not text:
-            continue
-        options = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:5]
-        questions.append({"text": text, "options": options})
-    return {"questions": questions}
+    _guard_revision(search_id)
+    start_task(run_clarify_questions(search_id))
+    return {"started": True}
 
 
 class QA(BaseModel):
@@ -401,7 +327,7 @@ class ClarifyBody(BaseModel):
 
 @router.post("/{search_id}/clarify")
 async def clarify_search(search_id: int, body: ClarifyBody) -> dict:
-    """Answer round: fold the clarifying answers into a narrower query + refined question."""
+    """Answer round: fold the answers into a narrower query, then re-fetch — as a task."""
     answers = [
         {"question": a.question.strip(), "answer": a.answer.strip()}
         for a in body.answers
@@ -409,19 +335,9 @@ async def clarify_search(search_id: int, body: ClarifyBody) -> dict:
     ]
     if not answers:
         raise HTTPException(400, "no answers given")
-    if search_id in RUNNING:
-        raise HTTPException(409, "search is running — wait for it to finish")
-    raw_query, current_query, found, titles, prior = _revision_context(search_id)
-    combined = prior + answers
-    translated, rationale, refined = await _translate(
-        prompts.clarified_translator_system(),
-        prompts.clarify_answers_user(raw_query, current_query, found, titles, combined),
-        "clarification failed",
-    )
-    extra = {"clarifications": json.dumps(combined, ensure_ascii=False)}
-    if refined:  # keep any earlier refined question if this round didn't return one
-        extra["refined_question"] = refined
-    return _apply_translation(search_id, translated, rationale, **extra)
+    _guard_revision(search_id)
+    start_task(run_revision(search_id, "clarify", answers))
+    return {"started": True}
 
 
 @router.get("/{search_id}/status")
@@ -483,21 +399,15 @@ def pool(search_id: int) -> dict:
 
 @router.post("/{search_id}/synthesise")
 async def synthesise(search_id: int) -> dict:
-    try:
-        llm.resolve_model()
-    except llm.LLMNotConfigured as e:
-        raise HTTPException(409, str(e))
-    try:
-        note = await run_synthesis(search_id)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except llm.LLMError as e:
-        raise HTTPException(502, str(e))
-    return {
-        "id": note.id,
-        "search_id": note.search_id,
-        "title": note.title,
-        "body_md": note.body_md,
-        "paper_ids": json.loads(note.paper_ids),
-        "created_at": note.created_at,
-    }
+    """Start the synthesis task; the client polls status for synthesis_note_id."""
+    _guard_revision(search_id)
+    with session() as s:
+        kept = s.exec(
+            select(func.count()).select_from(SearchResult).where(
+                SearchResult.search_id == search_id, SearchResult.status == "kept"
+            )
+        ).one()
+    if kept == 0:
+        raise HTTPException(400, "nothing in the pool yet — keep some papers first")
+    start_task(run_synthesis_task(search_id))
+    return {"started": True}

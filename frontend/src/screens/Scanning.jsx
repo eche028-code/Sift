@@ -16,6 +16,10 @@ export default function Scanning({ go, searchId }) {
         const r = await api.status(searchId);
         if (!alive) return;
         setSt(r);
+        if (r.stage === "new") {
+          timer = setTimeout(() => alive && goRef.current("filters", { searchId }), 400);
+          return;
+        }
         if (r.stage === "fetched") {
           timer = setTimeout(() => alive && goRef.current("results", { searchId }), 400);
           return;
@@ -55,7 +59,10 @@ export default function Scanning({ go, searchId }) {
         },
       ]
     : [
-        { label: "Converting natural language → PubMed syntax", state: "done" },
+        {
+          label: "Converting natural language → PubMed syntax",
+          state: stage === "translating" ? "active" : "done",
+        },
         {
           label: "Querying PubMed" + (d.found != null ? ` — ${d.found} records` : ""),
           state: stage === "searching" ? "active" : stage === "fetched" ? "done" : "todo",

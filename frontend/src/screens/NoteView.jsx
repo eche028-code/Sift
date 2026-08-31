@@ -13,9 +13,33 @@ export default function NoteView({ go, searchId, noteId, generate, backTo = "poo
     if (ran.current) return; // never double-fire the synthesis POST
     ran.current = true;
     let alive = true;
-    (generate ? api.synthesise(searchId) : api.getNote(noteId))
-      .then((n) => alive && setNote(n))
-      .catch((e) => alive && setError(e));
+    const load = async () => {
+      try {
+        if (!generate) {
+          const n = await api.getNote(noteId);
+          if (alive) setNote(n);
+          return;
+        }
+        // Synthesis runs as a server task (the model call is minutes-slow on a
+        // thinking model); fire it — unless one is already running — then poll.
+        const st0 = await api.status(searchId).catch(() => null);
+        if (st0?.stage_detail?.synthesis_status !== "running") await api.synthesise(searchId);
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 900));
+          if (!alive) return;
+          const st = await api.status(searchId).catch(() => null); // transient miss — keep polling
+          const d = st?.stage_detail;
+          if (!d || d.synthesis_status === "running") continue;
+          if (d.synthesis_status === "error") throw new Error(d.synthesis_error || "synthesis failed");
+          const n = await api.getNote(d.synthesis_note_id);
+          if (alive) setNote(n);
+          return;
+        }
+      } catch (e) {
+        if (alive) setError(e);
+      }
+    };
+    load();
     return () => { alive = false; };
   }, []);
 

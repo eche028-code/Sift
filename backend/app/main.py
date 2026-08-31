@@ -41,7 +41,19 @@ def reset_interrupted_searches() -> None:
             detail["error"] = "Interrupted by a server restart — run the search again."
             search.stage_detail = json.dumps(detail)
             s.add(search)
-        if stuck:
+        # clarifier/synthesis rounds mid-flight leave a 'running' status with no task behind it
+        dangling = s.exec(
+            select(Search).where(Search.stage_detail.contains('_status": "running"'))  # type: ignore[attr-defined]
+        ).all()
+        for search in dangling:
+            detail = json.loads(search.stage_detail) if search.stage_detail else {}
+            for kind in ("clarify", "synthesis"):
+                if detail.get(f"{kind}_status") == "running":
+                    detail[f"{kind}_status"] = "error"
+                    detail[f"{kind}_error"] = "Interrupted by a server restart — tap to retry."
+            search.stage_detail = json.dumps(detail)
+            s.add(search)
+        if stuck or dangling:
             s.commit()
 
 

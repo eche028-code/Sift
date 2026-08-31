@@ -357,13 +357,189 @@ async def _run_screen_inner(search_id: int) -> dict:
         raise
 
 
-def start_pipeline_task(search_id: int, mode: str = "fetch") -> None:
-    stage = run_screen if mode == "screen" else run_fetch
+# ── background query revision (refine / clarify) ─────────────
+#
+# These calls go through the same thinking model as triage and routinely take
+# 45-80s. A phone PWA won't hold a fetch that long (iOS aborts around 60s, and
+# instantly on backgrounding), so like fetch/screen they run as tasks and the
+# client polls status; the LLM round-trip never rides on the request socket.
+
+
+def revision_context(search_id: int) -> tuple[str, str, int | None, list[str], list[dict]] | None:
+    """(raw_query, current_query, found, sample_titles, clarifications), or None if gone."""
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            return None
+        titles = list(s.exec(
+            select(Paper.title)
+            .join(SearchResult, SearchResult.paper_id == Paper.id)
+            .where(SearchResult.search_id == search_id)
+            .order_by(Paper.year.desc())  # type: ignore[union-attr]
+            .limit(12)
+        ).all())
+        detail = json.loads(search.stage_detail) if search.stage_detail else {}
+        clar = []
+        if search.clarifications:
+            try:
+                parsed = json.loads(search.clarifications)
+                clar = parsed if isinstance(parsed, list) else []
+            except ValueError:
+                pass
+        return (
+            search.raw_query,
+            search.translated_query or "",
+            detail.get("found"),
+            titles,
+            clar,
+        )
+
+
+async def _translate_round(system: str, user: str) -> tuple[str, str, str]:
+    """One query-converter call: (pubmed_query, rationale, refined_question)."""
+    reply = await llm.chat("query converter", system, user, temperature=0.0)
+    parsed = llm.extract_json(reply)
+    translated = str(parsed.get("pubmed_query") or "").strip()
+    if not translated:
+        raise ValueError("query converter returned no pubmed_query")
+    return (
+        translated,
+        str(parsed.get("rationale") or "").strip(),
+        str(parsed.get("refined_question") or "").strip(),
+    )
+
+
+def _persist_translation(search_id: int, translated: str, rationale: str, **fields) -> None:
+    with session() as s:
+        search = s.get(Search, search_id)
+        if search is None:
+            return
+        search.translated_query = translated
+        for key, value in fields.items():
+            setattr(search, key, value)
+        detail = json.loads(search.stage_detail) if search.stage_detail else {}
+        detail["rationale"] = rationale
+        search.stage_detail = json.dumps(detail)
+        s.add(search)
+        s.commit()
+
+
+async def run_translate(search_id: int) -> None:
+    """First conversion of a raw question into a PubMed query; ends at stage 'new'."""
+    if search_id in RUNNING:
+        raise RuntimeError("already running")
+    RUNNING.add(search_id)
+    try:
+        with session() as s:
+            search = s.get(Search, search_id)
+            if search is None:
+                return
+            raw = search.raw_query
+        try:
+            translated, rationale, _refined = await _translate_round(
+                prompts.translator_system(), raw
+            )
+        except Exception as e:
+            log.exception("query conversion failed for search %s", search_id)
+            set_stage(search_id, "error", error=f"query conversion failed: {e}"[:500])
+            return
+        _persist_translation(search_id, translated, rationale, stage="new")
+    finally:
+        RUNNING.discard(search_id)
+
+
+async def run_revision(search_id: int, mode: str, payload) -> None:
+    """Rebuild the query from a refine instruction or clarify answers, then re-fetch.
+
+    mode 'refine': payload is the instruction string.
+    mode 'clarify': payload is the new [{question, answer}] list.
+    """
+    if search_id in RUNNING:
+        raise RuntimeError("already running")
+    RUNNING.add(search_id)
+    try:
+        ctx = revision_context(search_id)
+        if ctx is None:
+            return
+        raw_query, current_query, found, titles, prior = ctx
+        # entering a new revision invalidates any question round left in the detail
+        set_stage(search_id, "translating", error=None,
+                  clarify_status=None, clarify_questions=None, clarify_error=None)
+        try:
+            if mode == "clarify":
+                combined = prior + payload
+                translated, rationale, refined = await _translate_round(
+                    prompts.clarified_translator_system(),
+                    prompts.clarify_answers_user(raw_query, current_query, found, titles, combined),
+                )
+                extra = {"clarifications": json.dumps(combined, ensure_ascii=False)}
+                if refined:  # keep any earlier refined question if this round didn't return one
+                    extra["refined_question"] = refined
+            else:
+                translated, rationale, _refined = await _translate_round(
+                    prompts.translator_system(),
+                    prompts.refine_user(raw_query, current_query, found, titles, payload, prior),
+                )
+                extra = {}
+        except Exception as e:
+            log.exception("%s failed for search %s", mode, search_id)
+            failure = "clarification failed" if mode == "clarify" else "refinement failed"
+            set_stage(search_id, "error", error=f"{failure}: {e}"[:500])
+            return
+        _persist_translation(search_id, translated, rationale, **extra)
+        await _run_fetch_inner(search_id)
+    finally:
+        RUNNING.discard(search_id)
+
+
+async def run_clarify_questions(search_id: int) -> None:
+    """Ask round: propose narrowing questions. Leaves the stage alone; results land in stage_detail."""
+    if search_id in RUNNING:
+        raise RuntimeError("already running")
+    RUNNING.add(search_id)
+    try:
+        ctx = revision_context(search_id)
+        if ctx is None:
+            return
+        raw_query, current_query, found, titles, clar = ctx
+        set_stage(search_id, clarify_status="running", clarify_questions=None, clarify_error=None)
+        try:
+            reply = await llm.chat(
+                "clarifier",
+                prompts.clarifier_system(),
+                prompts.clarify_questions_user(raw_query, current_query, found, titles, clar),
+                temperature=0.2,
+            )
+            parsed = llm.extract_json(reply)
+        except Exception as e:
+            log.exception("clarifier failed for search %s", search_id)
+            set_stage(search_id, clarify_status="error", clarify_error=f"clarifier failed: {e}"[:300])
+            return
+        questions = []
+        for q in (parsed.get("clarify_questions") or [])[:3]:  # the cap is code-enforced
+            if not isinstance(q, dict):
+                continue
+            text = str(q.get("text") or "").strip()
+            if not text:
+                continue
+            options = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:5]
+            questions.append({"text": text, "options": options})
+        set_stage(search_id, clarify_status="done", clarify_questions=questions)
+    finally:
+        RUNNING.discard(search_id)
+
+
+def start_task(coro) -> None:
+    """Fire-and-forget a pipeline coroutine; failures are logged and staged inside."""
 
     async def runner():
         try:
-            await stage(search_id)
+            await coro
         except Exception:
             pass  # already logged and staged
 
     asyncio.get_running_loop().create_task(runner())
+
+
+def start_pipeline_task(search_id: int, mode: str = "fetch") -> None:
+    start_task((run_screen if mode == "screen" else run_fetch)(search_id))

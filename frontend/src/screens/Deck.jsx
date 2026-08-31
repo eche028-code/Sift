@@ -3,6 +3,24 @@ import { Check, ChevronDown, Undo2, X } from "lucide-react";
 import { api, queueLength } from "../api";
 import { Busy, ErrorBox, Header, PaperCard, PaperFull, PoolChip } from "../components/bits";
 
+const FLY_MS = 240;  // discarded card's flight off-screen; the deck shifts as it lands
+const RISE_MS = 200; // the card behind rising and growing into the vacated slot
+
+// Resting pose per depth: the card behind sits low and small, so promoting it is
+// just a transition up to the top pose — the next card comes from below, never
+// from the side the last one was flung to.
+const STACK = [
+  { y: 0, scale: 1, opacity: 1 },
+  { y: 8, scale: 0.95, opacity: 0.7 },
+  { y: 16, scale: 0.9, opacity: 0.4 },
+];
+
+const stackStyle = (i) => ({
+  transform: `translateY(${STACK[i].y}px) scale(${STACK[i].scale})`,
+  opacity: STACK[i].opacity,
+  transition: `transform ${RISE_MS}ms ease-out, opacity ${RISE_MS}ms ease-out`,
+});
+
 export default function Deck({ go, searchId }) {
   const [deck, setDeck] = useState(null); // null = loading
   const [counts, setCounts] = useState({ kept: 0, skipped: 0, pending: 0 });
@@ -48,7 +66,7 @@ export default function Deck({ go, searchId }) {
   const fly = (dir) => {
     if (flying || !deck || deck.length === 0) return;
     setFlying(dir);
-    setTimeout(() => commit(dir), 280);
+    setTimeout(() => commit(dir), FLY_MS);
   };
 
   const undo = () => {
@@ -98,7 +116,7 @@ export default function Deck({ go, searchId }) {
     ? {
         transform: `translate(${flying === "right" ? 520 : -520}px, ${drag.dy}px) rotate(${flying === "right" ? 20 : -20}deg)`,
         opacity: 0,
-        transition: "transform 300ms ease-out, opacity 300ms ease-out",
+        transition: `transform ${FLY_MS}ms ease-out, opacity ${FLY_MS}ms ease-out`,
         touchAction: "none",
       }
     : drag.active
@@ -107,7 +125,12 @@ export default function Deck({ go, searchId }) {
         transition: "none",
         touchAction: "none",
       }
-    : { transform: "none", transition: "transform 200ms ease-out", touchAction: "none" };
+    : {
+        transform: "none",
+        opacity: 1,
+        transition: `transform ${RISE_MS}ms ease-out, opacity ${RISE_MS}ms ease-out`,
+        touchAction: "none",
+      };
 
   const stampKeep = flying === "right" ? 1 : Math.min(1, Math.max(0, (drag.dx - 30) / 70));
   const stampSkip = flying === "left" ? 1 : Math.min(1, Math.max(0, (-drag.dx - 30) / 70));
@@ -160,26 +183,35 @@ export default function Deck({ go, searchId }) {
           </div>
         ) : (
           <div className="relative h-full">
-            {deck[2] && (
-              <div className="absolute inset-0 scale-90 translate-y-4 opacity-40">
-                <PaperCard p={deck[2]} />
-              </div>
-            )}
-            {deck[1] && (
-              <div className="absolute inset-0 scale-95 translate-y-2 opacity-70 transition-transform duration-200">
-                <PaperCard p={deck[1]} />
-              </div>
-            )}
-            <div
-              className="absolute inset-0 cursor-grab active:cursor-grabbing"
-              style={topStyle}
-              onPointerDown={onDown}
-              onPointerMove={onMove}
-              onPointerUp={onUp}
-              onPointerCancel={onUp}
-            >
-              <PaperCard p={deck[0]} stampKeep={stampKeep} stampSkip={stampSkip} tapHint />
-            </div>
+            {/* Deepest card first and keyed by paper, so a card keeps its own DOM
+                node as it is promoted. Positional children would hand the flying
+                card's node — mid-flight, off to one side — to the card behind it,
+                which then slid back in from the side just swiped to, as if the
+                decision had been undone. */}
+            {[2, 1, 0].map((i) => {
+              const p = deck[i];
+              if (!p) return null;
+              if (i > 0) {
+                return (
+                  <div key={p.paper_id} className="absolute inset-0" style={stackStyle(i)}>
+                    <PaperCard p={p} />
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={p.paper_id}
+                  className="absolute inset-0 cursor-grab active:cursor-grabbing"
+                  style={topStyle}
+                  onPointerDown={onDown}
+                  onPointerMove={onMove}
+                  onPointerUp={onUp}
+                  onPointerCancel={onUp}
+                >
+                  <PaperCard p={p} stampKeep={stampKeep} stampSkip={stampSkip} tapHint />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

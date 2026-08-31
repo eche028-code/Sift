@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, ExternalLink, ListFilter, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { api } from "../api";
 import { Busy, ErrorBox, Header } from "../components/bits";
@@ -25,13 +25,43 @@ export default function Results({ go, searchId }) {
   const [clar, setClar] = useState(null); // { questions, sel: {i: option|'__other__'}, other: {i: text} }
   const [clarDone, setClarDone] = useState(false); // clarifier had nothing to ask — unlock screening
 
+  const alive = useRef(true);
   useEffect(() => {
-    let alive = true;
+    alive.current = true;
     api.results(searchId)
-      .then((r) => alive && setData(r))
-      .catch((e) => alive && setError(e));
-    return () => { alive = false; };
+      .then((r) => {
+        if (!alive.current) return;
+        setData(r);
+        if (r.search.stage_detail?.clarify_status === "running") {
+          setBusy("clarify");
+          awaitQuestions();
+        }
+      })
+      .catch((e) => alive.current && setError(e));
+    return () => { alive.current = false; };
   }, [searchId]);
+
+  // The clarifier runs server-side as a background task (thinking models take a
+  // minute — far longer than a phone will hold a request). Poll until it lands.
+  const awaitQuestions = async () => {
+    try {
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 900));
+        if (!alive.current) return;
+        const st = await api.status(searchId).catch(() => null); // transient miss — keep polling
+        const d = st?.stage_detail;
+        if (!d || d.clarify_status === "running") continue;
+        if (d.clarify_status === "error") throw new Error(d.clarify_error || "clarifier failed");
+        const qs = d.clarify_questions || [];
+        if (!qs.length) setClarDone(true); // as narrow as the question allows
+        else setClar({ questions: qs, sel: {}, other: {} });
+        break;
+      }
+    } catch (e) {
+      if (alive.current) setError(e);
+    }
+    if (alive.current) setBusy(null);
+  };
 
   if (!data) {
     return (
@@ -68,7 +98,6 @@ export default function Results({ go, searchId }) {
     setError(null);
     try {
       await api.refineSearch(searchId, refine.trim());
-      await api.runSearch(searchId);
       go("scanning", { searchId });
     } catch (e) {
       setError(e);
@@ -81,13 +110,13 @@ export default function Results({ go, searchId }) {
     setBusy("clarify");
     setError(null);
     try {
-      const r = await api.clarifyQuestions(searchId);
-      if (!r.questions?.length) setClarDone(true); // as narrow as the question allows
-      else setClar({ questions: r.questions, sel: {}, other: {} });
+      await api.clarifyQuestions(searchId);
     } catch (e) {
       setError(e);
+      setBusy(null);
+      return;
     }
-    setBusy(null);
+    awaitQuestions();
   };
 
   const pick = (i, value) =>
@@ -110,7 +139,6 @@ export default function Results({ go, searchId }) {
     setError(null);
     try {
       await api.clarifySearch(searchId, answers);
-      await api.runSearch(searchId);
       go("scanning", { searchId });
     } catch (e) {
       setError(e);

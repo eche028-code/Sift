@@ -16,10 +16,10 @@ DEFAULT_CLARIFIER = """- Narrow along whichever axes matter most here: populatio
 
 DEFAULT_TRIAGE = """Score 0-100 for evidence quality: study design first (meta-analysis and RCT high; prospective cohort middle; retrospective and cross-sectional lower; case series and surveys low), then sample size, follow-up length, masking, and registration or pre-specification of outcomes."""
 
-DEFAULT_SYNTHESIS = """- One opening sentence with the counts you are given (screened / passed triage / kept).
+DEFAULT_SYNTHESIS = """- "## Clinical takeaway" comes FIRST: two or three sentences, practical and specific, cautious where the evidence is weak — the reader should get the answer before the detail.
+- Then one sentence with the counts you are given (screened / passed triage / kept).
 - "## Findings" — one bullet per paper: **FirstAuthor et al. (Year, Design, n=N)** — the key finding, one sentence. End the bullet with the grade in italics, e.g. *[Strong]*.
-- "## Where the evidence is thin" — one short paragraph on recurring limitations and open questions across these papers.
-- "## Clinical takeaway" — two or three sentences, practical and specific, cautious where the evidence is weak."""
+- "## Where the evidence is thin" — one short paragraph on recurring limitations and open questions across these papers."""
 
 DEFAULT_PROMPTS = {
     "translator": DEFAULT_TRANSLATOR,

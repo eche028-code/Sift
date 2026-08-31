@@ -4,8 +4,7 @@ import { api } from "../api";
 import { ErrorBox, Header } from "../components/bits";
 
 const SAMPLES = [
-  "Does ortho-k slow axial elongation in kids under 12?",
-  "Rebound after stopping low-dose atropine",
+  "Does IPL beat warm compresses for meibomian gland dysfunction?",
   "Is red-light therapy safe for myopia control?",
 ];
 
@@ -20,7 +19,7 @@ export default function Search({ go }) {
     setError(null);
     try {
       const search = await api.createSearch(query.trim());
-      go("filters", { search });
+      go("scanning", { searchId: search.id });
     } catch (e) {
       setError(e);
       setBusy(false);
@@ -44,16 +43,21 @@ export default function Search({ go }) {
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          {SAMPLES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setQuery(s)}
-              className="text-left text-sm text-slate-400 border border-slate-800 rounded-lg px-3 py-2 active:border-teal-600 active:text-teal-300"
-            >
-              {s}
-            </button>
-          ))}
+        <div>
+          <p className="font-mono text-xs uppercase tracking-wide text-slate-500">
+            Example:
+          </p>
+          <div className="mt-2 flex flex-col gap-2">
+            {SAMPLES.map((s) => (
+              <button
+                key={s}
+                onClick={() => setQuery(s)}
+                className="text-left text-sm text-slate-400 border border-slate-800 rounded-lg px-3 py-2 active:border-teal-600 active:text-teal-300"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
 
         {error && (
