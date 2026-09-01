@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { flushQueue } from "./api";
+import { api, flushQueue } from "./api";
+import Bulletin from "./screens/Bulletin";
 import Deck from "./screens/Deck";
 import Detail from "./screens/Detail";
 import Filters from "./screens/Filters";
@@ -19,6 +20,18 @@ export default function App() {
 
   useEffect(() => {
     flushQueue();
+    // free bulletin poll on open/resume — the server no-ops unless a watched
+    // topic is stale, so firing on every foreground is cheap and safe
+    const poll = () => api.pollBulletin().catch(() => {});
+    poll();
+    const onVisible = () => {
+      if (!document.hidden) {
+        poll();
+        flushQueue();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   const s = nav.screen;
@@ -30,7 +43,8 @@ export default function App() {
         className={`w-full h-dvh overflow-hidden flex flex-col bg-slate-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}
       >
         {s === "topics" && <Topics go={go} />}
-        {s === "search" && <SearchScreen go={go} />}
+        {s === "bulletin" && <Bulletin go={go} />}
+        {s === "search" && <SearchScreen go={go} prefill={nav.prefill} />}
         {s === "filters" && <Filters go={go} search={nav.search} searchId={nav.searchId ?? nav.search?.id} />}
         {s === "scanning" && <Scanning go={go} searchId={nav.searchId} />}
         {s === "results" && <Results go={go} searchId={nav.searchId} />}

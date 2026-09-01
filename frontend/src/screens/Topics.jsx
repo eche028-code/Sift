@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Bookmark, BookmarkCheck, ChevronRight, FileText, Layers,
+  Bookmark, BookmarkCheck, ChevronRight, FileText, Layers, Newspaper, Rss,
   Settings as SettingsIcon, Trash2,
 } from "lucide-react";
 import { api } from "../api";
@@ -25,7 +25,7 @@ const stageLine = (row) => {
   return bits.join(" · ") || "deck cleared";
 };
 
-const Row = ({ row, onOpen, onToggleSave, onDelete }) => (
+const Row = ({ row, newCount = 0, onOpen, onToggleSave, onToggleWatch, onDelete }) => (
   <div
     onClick={onOpen}
     className="rounded-xl border border-slate-800 bg-slate-900 p-4 active:border-teal-600 cursor-pointer"
@@ -37,6 +37,11 @@ const Row = ({ row, onOpen, onToggleSave, onDelete }) => (
           {stageLine(row)}
         </p>
       </div>
+      {newCount > 0 && (
+        <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-amber-600 text-amber-300 font-mono text-xs px-2.5 py-1">
+          <Newspaper size={13} /> {newCount}
+        </span>
+      )}
       {row.counts.pending > 0 && (
         <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-teal-500 text-teal-300 font-mono text-xs px-2.5 py-1">
           <Layers size={13} /> {row.counts.pending}
@@ -51,6 +56,15 @@ const Row = ({ row, onOpen, onToggleSave, onDelete }) => (
       >
         {row.is_saved ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
       </button>
+      {row.is_saved && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleWatch(); }}
+          className={`p-1.5 ${row.watched ? "text-teal-400" : "text-slate-600"} active:text-teal-300`}
+          aria-label={row.watched ? "Stop watching for new papers" : "Watch for new papers"}
+        >
+          <Rss size={16} />
+        </button>
+      )}
       {!row.is_saved && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -69,13 +83,22 @@ export default function Topics({ go }) {
   const [searches, setSearches] = useState(null);
   const [notes, setNotes] = useState([]);
   const [config, setConfig] = useState(null);
+  const [bulletin, setBulletin] = useState(null);
 
   const load = () => {
     api.listSearches().then(setSearches).catch(() => setSearches([]));
     api.listNotes().then(setNotes).catch(() => {});
     api.getSettings().then(setConfig).catch(() => setConfig(null));
+    api.bulletin().then(setBulletin).catch(() => {});
   };
   useEffect(load, []);
+
+  // a poll kicked off at app open may still be running — keep the badges live
+  useEffect(() => {
+    if (!bulletin?.poll_running) return;
+    const timer = setTimeout(() => api.bulletin().then(setBulletin).catch(() => {}), 1500);
+    return () => clearTimeout(timer);
+  }, [bulletin]);
 
   const openRow = (row) => {
     if (RUNNING_STAGES.includes(row.stage) || row.stage === "error") go("scanning", { searchId: row.id });
@@ -84,7 +107,13 @@ export default function Topics({ go }) {
     else go("deck", { searchId: row.id });
   };
   const toggleSave = async (row) => {
-    await api.patchSearch(row.id, { is_saved: !row.is_saved }).catch(() => {});
+    const fields = { is_saved: !row.is_saved };
+    if (row.is_saved && row.watched) fields.watched = false; // unpinning also stops the watch
+    await api.patchSearch(row.id, fields).catch(() => {});
+    load();
+  };
+  const toggleWatch = async (row) => {
+    await api.patchSearch(row.id, { watched: !row.watched }).catch(() => {});
     load();
   };
   const del = async (row) => {
@@ -96,6 +125,8 @@ export default function Topics({ go }) {
   const saved = (searches || []).filter((x) => x.is_saved);
   const recent = (searches || []).filter((x) => !x.is_saved).slice(0, 10);
   const needsSetup = config !== null && !(config.llm_base_url?.trim() && config.llm_model?.trim());
+  const newBy = {};
+  (bulletin?.topics || []).forEach((t) => { newBy[t.search_id] = t.items.length; });
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -131,6 +162,24 @@ export default function Topics({ go }) {
               </button>
             )}
 
+            {bulletin && bulletin.topics.length > 0 && (
+              <button
+                onClick={() => go("bulletin")}
+                className="w-full text-left rounded-xl border border-slate-800 bg-slate-900 p-4 active:border-teal-600 flex items-center gap-3"
+              >
+                <Newspaper size={16} className={`shrink-0 ${bulletin.total_new > 0 ? "text-amber-300" : "text-slate-500"}`} />
+                <span className="text-sm text-slate-300 flex-1">Bulletin</span>
+                {bulletin.poll_running ? (
+                  <span className="font-mono text-xs text-teal-400 animate-pulse">checking…</span>
+                ) : (
+                  <span className={`font-mono text-xs ${bulletin.total_new > 0 ? "text-amber-300" : "text-slate-500"}`}>
+                    {bulletin.total_new > 0 ? `${bulletin.total_new} new` : "nothing new"}
+                  </span>
+                )}
+                <ChevronRight size={16} className="text-slate-600" />
+              </button>
+            )}
+
             {saved.length > 0 && (
               <div>
                 <p className="font-mono text-xs uppercase tracking-wide text-slate-500 mb-2">
@@ -138,8 +187,9 @@ export default function Topics({ go }) {
                 </p>
                 <div className="flex flex-col gap-3">
                   {saved.map((row) => (
-                    <Row key={row.id} row={row} onOpen={() => openRow(row)}
-                      onToggleSave={() => toggleSave(row)} onDelete={() => del(row)} />
+                    <Row key={row.id} row={row} newCount={newBy[row.id] || 0} onOpen={() => openRow(row)}
+                      onToggleSave={() => toggleSave(row)} onToggleWatch={() => toggleWatch(row)}
+                      onDelete={() => del(row)} />
                   ))}
                 </div>
               </div>
@@ -152,8 +202,9 @@ export default function Topics({ go }) {
                 </p>
                 <div className="flex flex-col gap-3">
                   {recent.map((row) => (
-                    <Row key={row.id} row={row} onOpen={() => openRow(row)}
-                      onToggleSave={() => toggleSave(row)} onDelete={() => del(row)} />
+                    <Row key={row.id} row={row} newCount={newBy[row.id] || 0} onOpen={() => openRow(row)}
+                      onToggleSave={() => toggleSave(row)} onToggleWatch={() => toggleWatch(row)}
+                      onDelete={() => del(row)} />
                   ))}
                 </div>
               </div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, Check, ExternalLink, Eye, FileText, HelpCircle, History,
-  Layers, Maximize2, Menu, Search, Settings, X,
+  Layers, Maximize2, Menu, Newspaper, Search, Settings, X,
 } from "lucide-react";
 import { gradeOf } from "../grade";
 
@@ -38,6 +38,7 @@ export const GearButton = ({ onClick, className = "" }) => (
 const NAV_ITEMS = [
   { id: "search", label: "New Search", Icon: Search },
   { id: "topics", label: "Recent Search", Icon: History },
+  { id: "bulletin", label: "Bulletin", Icon: Newspaper },
   { id: "notes", label: "Library", Icon: FileText },
   { id: "help", label: "How to use", Icon: HelpCircle },
 ];

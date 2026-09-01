@@ -8,8 +8,8 @@ const SAMPLES = [
   "Is red-light therapy safe for myopia control?",
 ];
 
-export default function Search({ go }) {
-  const [query, setQuery] = useState("");
+export default function Search({ go, prefill }) {
+  const [query, setQuery] = useState(prefill || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 

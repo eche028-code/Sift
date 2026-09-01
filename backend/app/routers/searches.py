@@ -7,12 +7,13 @@ from sqlmodel import func, select
 from .. import llm
 from .. import settings_store as st
 from ..db import session
-from ..models import Note, Paper, Search, SearchResult, Triage
+from ..models import BulletinItem, Note, Paper, Search, SearchResult, Triage, utcnow
 from ..pipeline import (
     RUNNING, _screening_workload, run_clarify_questions, run_revision,
     run_translate, start_pipeline_task, start_task,
 )
 from ..synthesis import run_synthesis_task
+from ..watch import clear_watch
 
 router = APIRouter(prefix="/api/searches", tags=["searches"])
 
@@ -69,6 +70,8 @@ def _search_out(s, search: Search) -> dict:
         "date_to": search.date_to,
         "pdf_only": bool(search.pdf_only),
         "is_saved": bool(search.is_saved),
+        "watched": bool(search.watched),
+        "watch_checked_at": search.watch_checked_at,
         "stage": search.stage,
         "stage_detail": _detail(search),
         "clarifications": _clarifications(search),
@@ -152,11 +155,13 @@ class SearchPatch(BaseModel):
     date_to: str | None = None
     pdf_only: bool | None = None
     is_saved: bool | None = None
+    watched: bool | None = None
 
 
 @router.patch("/{search_id}")
 def patch_search(search_id: int, body: SearchPatch) -> dict:
     fields = body.model_dump(exclude_unset=True)
+    watched = fields.pop("watched", None)
     with session() as s:
         search = s.get(Search, search_id)
         if search is None:
@@ -167,8 +172,14 @@ def patch_search(search_id: int, body: SearchPatch) -> dict:
             if key == "translated_query" and (value or "").strip() == "":
                 raise HTTPException(400, "the PubMed query cannot be empty")
             setattr(search, key, value)
+        if watched is not None and int(watched) != (search.watched or 0):
+            search.watched = int(watched)
+            # watching starts from now — the bulletin is news, never backfill
+            search.watch_checked_at = utcnow() if watched else None
         s.add(search)
         s.commit()
+        if watched is False:
+            clear_watch(search_id)
         return _search_out(s, search)
 
 
@@ -182,6 +193,8 @@ def delete_search(search_id: int) -> dict:
             raise HTTPException(404, "search not found")
         for sr in s.exec(select(SearchResult).where(SearchResult.search_id == search_id)).all():
             s.delete(sr)
+        for item in s.exec(select(BulletinItem).where(BulletinItem.search_id == search_id)).all():
+            s.delete(item)
         for note in s.exec(select(Note).where(Note.search_id == search_id)).all():
             note.search_id = None  # keep the note, orphan it
             s.add(note)

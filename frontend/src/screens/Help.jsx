@@ -83,6 +83,11 @@ export default function Help({ go }) {
           <p className="text-sm text-slate-400 leading-relaxed">
             Bookmark a topic to pin it under “Kept topics” on the Recent Search screen.
           </p>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Tap a kept topic's feed icon to watch it: opening the app then checks
+            PubMed for newly indexed matches (free, no AI) and collects them in
+            the Bulletin — screening still only happens when you ask.
+          </p>
         </div>
       </div>
     </>

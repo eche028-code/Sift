@@ -10,7 +10,7 @@ from sqlmodel import select
 
 from .db import BASE_DIR, DATA_DIR, init_db, session
 from .models import Search
-from .routers import llm_config, notes, results, searches, settings
+from .routers import bulletin, llm_config, notes, results, searches, settings
 
 log = logging.getLogger("sift")
 
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sift", lifespan=lifespan)
 
 app.include_router(searches.router)
+app.include_router(bulletin.router)
 app.include_router(results.router)
 app.include_router(notes.router)
 app.include_router(llm_config.router)

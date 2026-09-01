@@ -117,6 +117,26 @@ The bookmark toggle just keeps a search on the home screen under **Kept topics**
 schedule anything. To pick up newer papers, run the search again — anything already triaged is
 never re-screened, so a re-run only costs tokens on genuinely new abstracts.
 
+## The bulletin watch (free)
+
+A kept topic can also be **watched** (the feed icon next to its bookmark). Opening the app then
+checks PubMed for records *newly indexed* since the last check — a plain E-utilities delta query
+on the Entrez date, no LLM anywhere — and collects the matches in the **Bulletin** as titles to
+skim. From an item you can **dismiss** it, open it on PubMed, or **Ask about this** (starts a new
+search seeded from it); a topic with news also offers **Run this search**, the normal re-run that
+screens only the new abstracts.
+
+Design points, so expectations are right:
+
+- **No scheduler.** Nothing polls while the app is closed. A poll fires when you open (or
+  re-foreground) the app, at most every 12 hours, and PubMed date windows are retroactive — days
+  offline are picked up in full on the next open, nothing is ever missed.
+- **Zero tokens.** Collection never touches the model. Tokens are spent only when you act on the
+  bulletin, through the same two-stage pipeline as any search.
+- Papers you have already screened, kept or skipped anywhere never appear as news; dismissed
+  items stay dismissed; items expire after 60 days; each poll keeps at most the 50 newest
+  matches per topic. Unwatching a topic clears its bulletin.
+
 ## Development
 
 ```bash
@@ -136,4 +156,4 @@ cd frontend && npm run build
 
 ## Not here yet
 
-Phase 2 "explore" deck (LLM proposes adjacent queries, `source='explore'`). The scheduled monthly crawl and backfill were built and then removed — this is an on-demand tool. Non-goals per spec: auth, multi-user, cloud, native app, Scholar scraping, trained ranking.
+Phase 2 "explore" deck (LLM proposes adjacent queries, `source='explore'`). The scheduled monthly crawl and backfill were built and then removed — this is an on-demand tool, and the bulletin watch keeps it one: it polls only when you open the app and never touches the model. Non-goals per spec: auth, multi-user, cloud, native app, Scholar scraping, trained ranking.

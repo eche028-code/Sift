@@ -48,8 +48,14 @@ async def esearch(
     term: str,
     date_from: str | None,
     date_to: str | None,
+    datetype: str = "pdat",
 ) -> tuple[int, str, str]:
-    """Returns (count, webenv, query_key). Dates are ISO YYYY-MM-DD."""
+    """Returns (count, webenv, query_key). Dates are ISO YYYY-MM-DD.
+
+    datetype: "pdat" filters by publication date (the search pipeline);
+    "edat" by the date PubMed indexed the record (the bulletin watch —
+    catches papers however late they land, and never re-misses a window).
+    """
     params = _common_params() | {
         "term": term,
         "retmode": "json",
@@ -57,7 +63,7 @@ async def esearch(
         "usehistory": "y",
     }
     if date_from or date_to:
-        params["datetype"] = "pdat"
+        params["datetype"] = datetype
         if date_from:
             params["mindate"] = date_from.replace("-", "/")
         params["maxdate"] = (date_to or "3000").replace("-", "/")

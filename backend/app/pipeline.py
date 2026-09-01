@@ -16,6 +16,7 @@ from .db import session
 from .enrich import enrich_papers
 from .models import Paper, Search, SearchResult, Triage
 from .pubmed import esearch, efetch_page
+from .watch import clear_covered
 
 log = logging.getLogger("sift.pipeline")
 
@@ -283,6 +284,7 @@ async def _run_fetch_inner(search_id: int) -> dict:
             stats["fetched"] = fetched
 
         _dedupe_and_link(records, search_id)
+        clear_covered(search_id)
 
         todo = _screening_workload(search_id)[1]
         set_stage(search_id, "fetched", to_screen=len(todo))

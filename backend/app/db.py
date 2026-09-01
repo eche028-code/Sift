@@ -46,4 +46,8 @@ def _migrate() -> None:
             conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN clarifications TEXT")
         if "refined_question" not in cols:
             conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN refined_question TEXT")
+        if "watched" not in cols:
+            conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN watched INTEGER NOT NULL DEFAULT 0")
+        if "watch_checked_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN watch_checked_at TEXT")
         conn.commit()

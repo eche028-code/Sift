@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -22,6 +23,8 @@ class Search(SQLModel, table=True):
     date_to: str | None = None
     pdf_only: int = 0
     is_saved: int = 0
+    watched: int = 0  # bulletin watch: free PubMed delta polls surface new items
+    watch_checked_at: str | None = None  # last successful poll; floor of the next window
     stage: str = "new"  # new|translating|searching|fetched|screening|ready|error
     stage_detail: str | None = None  # JSON
     clarifications: str | None = None  # JSON [{"question": ..., "answer": ...}], accumulated
@@ -73,6 +76,29 @@ class SearchResult(SQLModel, table=True):
     status: str = "pending"  # pending|kept|skipped
     source: str = "search"  # search|explore
     decided_at: str | None = None
+
+
+class BulletinItem(SQLModel, table=True):
+    """A new PubMed match for a watched search — news, not part of the corpus.
+
+    Rows persist after dismiss/promote so the pmid stays suppressed on later
+    polls; they only leave via expiry, unwatching, or a fetch that links the paper.
+    """
+
+    __tablename__ = "bulletin_items"
+    __table_args__ = (UniqueConstraint("search_id", "pmid"),)
+    id: int | None = Field(default=None, primary_key=True)
+    search_id: int = Field(foreign_key="searches.id", index=True)
+    pmid: str
+    title: str
+    authors: str | None = None
+    journal: str | None = None
+    year: int | None = None
+    pub_date: str | None = None
+    abstract: str | None = None
+    url: str | None = None
+    status: str = "new"  # new|dismissed|promoted
+    seen_at: str = Field(default_factory=utcnow)
 
 
 class Note(SQLModel, table=True):
