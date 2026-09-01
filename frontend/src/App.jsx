@@ -39,8 +39,9 @@ export default function App() {
   const wide = s === "settings";
   return (
     <div className="min-h-dvh bg-slate-950 text-slate-200 font-sans flex justify-center">
+      {/* `relative` keeps full-screen sheets (the Codex export dialog) inside the phone column */}
       <div
-        className={`w-full h-dvh overflow-hidden flex flex-col bg-slate-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}
+        className={`relative w-full h-dvh overflow-hidden flex flex-col bg-slate-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${wide ? "max-w-md lg:max-w-5xl" : "max-w-md"}`}
       >
         {s === "topics" && <Topics go={go} />}
         {s === "bulletin" && <Bulletin go={go} />}

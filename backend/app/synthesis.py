@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from . import llm, prompts
 from .db import session
-from .models import Note, Paper, Search, SearchResult, Triage
+from .models import Note, Paper, Search, SearchResult, Triage, utcnow
 from .pipeline import RUNNING, set_stage
 
 log = logging.getLogger("sift.synthesis")
@@ -92,7 +92,7 @@ async def synthesise(search_id: int) -> Note:
     body = await llm.chat(
         "synthesis",
         prompts.synthesis_system(search.refined_question or search.raw_query),
-        prompts.synthesis_user(counts, papers_payload),
+        prompts.synthesis_user(counts, papers_payload, utcnow()[:10]),
         temperature=0.4,
         force_json=False,
     )

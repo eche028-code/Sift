@@ -10,7 +10,7 @@ from sqlmodel import select
 
 from .db import BASE_DIR, DATA_DIR, init_db, session
 from .models import Search
-from .routers import bulletin, llm_config, notes, results, searches, settings
+from .routers import bulletin, codex, llm_config, notes, results, searches, settings
 
 log = logging.getLogger("sift")
 
@@ -72,6 +72,7 @@ app.include_router(searches.router)
 app.include_router(bulletin.router)
 app.include_router(results.router)
 app.include_router(notes.router)
+app.include_router(codex.router)
 app.include_router(llm_config.router)
 app.include_router(settings.router)
 

@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCheck, Copy, Sparkles } from "lucide-react";
+import { CheckCheck, Copy, Sparkles, Upload } from "lucide-react";
 import { api } from "../api";
 import { ErrorBox, Header, Markdown } from "../components/bits";
+import ExportDialog from "../components/ExportDialog";
+
+// The note opens with `# Q: …` so the Codex fragment can carry the question with
+// it; on screen the title already says it, so drop the line from the render only.
+const withoutQuestionHeading = (md) => {
+  const lines = (md || "").split("\n");
+  if (!/^\s*#\s*Q\s*:/i.test(lines[0] || "")) return md || "";
+  let i = 1;
+  while (i < lines.length && !lines[i].trim()) i += 1;
+  return lines.slice(i).join("\n");
+};
 
 export default function NoteView({ go, searchId, noteId, generate, backTo = "pool" }) {
   const [note, setNote] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportedAt, setExportedAt] = useState(null);
   const ran = useRef(false);
 
   useEffect(() => {
@@ -78,7 +91,7 @@ export default function NoteView({ go, searchId, noteId, generate, backTo = "poo
               {note.paper_ids.length === 1 ? "" : "s"} · {note.created_at?.slice(0, 10)}
             </p>
             <h2 className="font-serif text-xl leading-snug mb-3">{note.title}</h2>
-            <Markdown text={note.body_md} />
+            <Markdown text={withoutQuestionHeading(note.body_md)} />
           </div>
           <button
             onClick={copyNote}
@@ -92,7 +105,25 @@ export default function NoteView({ go, searchId, noteId, generate, backTo = "poo
               <><Copy size={16} /> Copy note</>
             )}
           </button>
+          <button
+            onClick={() => setExporting(true)}
+            className="mt-2 w-full rounded-xl border border-slate-700 text-slate-300 py-3.5 inline-flex items-center justify-center gap-2 active:bg-slate-900"
+          >
+            <Upload size={16} /> Export to Codex
+          </button>
+          {(exportedAt || note.exported_at) && (
+            <p className="font-mono text-xs text-slate-600 text-center mt-2">
+              exported {(exportedAt || note.exported_at).slice(0, 10)}
+            </p>
+          )}
         </div>
+      )}
+      {exporting && note && (
+        <ExportDialog
+          noteId={note.id}
+          onClose={() => setExporting(false)}
+          onExported={() => setExportedAt(new Date().toISOString())}
+        />
       )}
     </>
   );

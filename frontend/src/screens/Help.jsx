@@ -69,6 +69,11 @@ export default function Help({ go }) {
             per-paper findings and where the evidence is thin. Copy it out from
             the note; every note lives in the Library.
           </Step>
+          <Step n={7} title="Export to Codex">
+            File a note into your knowledge base: confirm its tags, add a
+            reflection in your own words if you have one, and take the fragment
+            as a file or on the clipboard.
+          </Step>
         </div>
 
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 flex flex-col gap-2">

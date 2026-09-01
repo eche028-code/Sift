@@ -16,8 +16,9 @@ DEFAULT_CLARIFIER = """- Narrow along whichever axes matter most here: populatio
 
 DEFAULT_TRIAGE = """Score 0-100 for evidence quality: study design first (meta-analysis and RCT high; prospective cohort middle; retrospective and cross-sectional lower; case series and surveys low), then sample size, follow-up length, masking, and registration or pre-specification of outcomes."""
 
-DEFAULT_SYNTHESIS = """- "## Clinical takeaway" comes FIRST: two or three sentences, practical and specific, cautious where the evidence is weak — the reader should get the answer before the detail.
-- Then one sentence with the counts you are given (screened / passed triage / kept).
+DEFAULT_SYNTHESIS = """- Open with the question as a level-1 heading, nothing above it: `# Q: <the question in one line>`.
+- "## Clinical takeaway" comes next: two or three sentences, practical and specific, cautious where the evidence is weak — the reader should get the answer before the detail.
+- Then one sentence carrying the date and counts you are given: "As of <date>: <n> screened, <n> passed triage, <n> kept — a synthesis of this clinician's curated pool, not a systematic review."
 - "## Findings" — one bullet per paper: **FirstAuthor et al. (Year, Design, n=N)** — the key finding, one sentence. End the bullet with the grade in italics, e.g. *[Strong]*.
 - "## Where the evidence is thin" — one short paragraph on recurring limitations and open questions across these papers."""
 
@@ -221,8 +222,9 @@ Write a markdown note with exactly this structure:
 No preamble, no code fences, markdown only. Do not invent papers or numbers."""
 
 
-def synthesis_user(counts: dict, papers: list[dict]) -> str:
+def synthesis_user(counts: dict, papers: list[dict], today: str) -> str:
     return (
+        f"Date: {today}\n"
         f"Counts: screened {counts.get('screened', '?')} abstracts, "
         f"{counts.get('passed', '?')} passed triage, {counts.get('kept', '?')} kept.\n\n"
         "Kept papers (JSON):\n" + json.dumps(papers, indent=1, ensure_ascii=False)

@@ -137,6 +137,35 @@ Design points, so expectations are right:
   items stay dismissed; items expire after 60 days; each poll keeps at most the 50 newest
   matches per topic. Unwatching a topic clears its bulletin.
 
+## Export to Codex
+
+A note can be filed into Codex as a `fragment.json` (spec v1). Open a note → **Export
+to Codex** → confirm its tags, optionally write a reflection → take the fragment as a
+file or on the clipboard, then on the Codex machine:
+
+```bash
+codex import sift-note-42.fragment.json
+```
+
+- **Tags come from Codex's own vocabulary.** Export it there with
+  `anchors.export_taxonomy_yaml` and paste it into **Settings → Codex**; it is stored at
+  `data/codex_taxonomy.yaml`. Sift suggests tags by plain word matching against that
+  list — free, no model call — and you confirm every one. Without the file loaded you
+  can still type tags, but nothing is checked against the knowledge base.
+- **The reflection is yours or absent.** Sift never writes that field and omits it
+  entirely when blank.
+- **`id` is `sift-note-<id>`, fixed.** Codex inserts plainly, so re-importing the same
+  note fails loudly instead of duplicating. Tags and the reflection are stored on the
+  note, so exporting it again produces the same fragment.
+- `created_at` is the note's synthesis date, not the export date — it dates the
+  snapshot of the evidence.
+- The Library's **Export reviewed notes as one file** button emits a JSON array of every
+  note that has been through the dialog. Notes that never were are left out: their tags
+  would be Sift's guesses rather than yours.
+
+Notes synthesised from now on open with a `# Q:` line carrying the question, which the
+fragment needs; older notes get that line added at export.
+
 ## Development
 
 ```bash

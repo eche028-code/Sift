@@ -52,15 +52,35 @@ export default function Settings({ go }) {
   const [models, setModels] = useState(null);
   const [saved, setSaved] = useState(false);
 
+  // The Codex vocabulary is a file, not a setting — it is re-exported from Codex
+  // whole, so it saves on its own rather than riding the Save button below.
+  const [taxonomy, setTaxonomy] = useState(null);
+  const [taxText, setTaxText] = useState("");
+  const [taxMsg, setTaxMsg] = useState("");
+
   const load = async () => {
-    const [s, d] = await Promise.all([
+    const [s, d, t] = await Promise.all([
       api.getSettings().catch(() => null),
       api.promptDefaults().catch(() => ({})),
+      api.getTaxonomy().catch(() => null),
     ]);
     setSettings(s);
     setDefaults(d);
+    setTaxonomy(t);
   };
   useEffect(() => { load(); }, []);
+
+  const saveTaxonomy = async () => {
+    try {
+      const r = await api.putTaxonomy(taxText);
+      setTaxonomy(r);
+      setTaxText("");
+      setTaxMsg(`${r.count} tag${r.count === 1 ? "" : "s"} loaded`);
+    } catch (e) {
+      setTaxMsg(e.message);
+    }
+    setTimeout(() => setTaxMsg(""), 5000);
+  };
 
   const set = (k) => (e) => setSettings((s) => ({ ...s, [k]: e.target.value }));
   const patch = (fields) => setSettings((s) => ({ ...s, ...fields }));
@@ -332,6 +352,45 @@ export default function Settings({ go }) {
                 <p className="text-xs text-slate-600 mt-1.5">
                   0 suggests every time. You can always tap "screen anyway" — this is a nudge, not a limit.
                 </p>
+              </div>
+            </section>
+
+            {/* ── codex ── */}
+            <section className="flex flex-col gap-4">
+              <Label>Codex</Label>
+              <p className="text-xs text-slate-600 -mt-2">
+                The tag vocabulary a note is filed under when you export it. Get it from Codex with{" "}
+                <span className="font-mono text-slate-500">anchors.export_taxonomy_yaml</span> and
+                paste it here — Sift suggests from this list and never invents tags.
+              </p>
+              <div>
+                <p className="text-xs text-slate-500 mb-1.5">
+                  {taxonomy?.count
+                    ? `${taxonomy.count} tags loaded — paste a newer export to replace them`
+                    : "No taxonomy yet — paste the YAML export"}
+                </p>
+                <textarea
+                  className={`${inputCls} font-mono text-xs resize-y`}
+                  rows={5}
+                  value={taxText}
+                  onChange={(e) => setTaxText(e.target.value)}
+                  placeholder={"tags:\n  - myopia_control\n  - atropine"}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <div className="flex items-center gap-3 mt-2">
+                  <button
+                    onClick={saveTaxonomy}
+                    disabled={!taxText.trim()}
+                    className="rounded-xl border border-slate-700 text-slate-300 px-4 py-2 text-sm active:bg-slate-900 disabled:opacity-40"
+                  >
+                    Load vocabulary
+                  </button>
+                  {taxMsg && <span className="font-mono text-xs text-slate-500">{taxMsg}</span>}
+                </div>
+                {taxonomy?.path && (
+                  <p className="font-mono text-xs text-slate-600 mt-2 break-all">{taxonomy.path}</p>
+                )}
               </div>
             </section>
 

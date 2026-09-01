@@ -108,6 +108,10 @@ class Note(SQLModel, table=True):
     title: str | None = None
     body_md: str
     paper_ids: str  # JSON array
+    # Codex export: confirmed in the review dialog, kept so a re-export is identical.
+    tags: str | None = None  # JSON array, lower_snake_case
+    reflection: str | None = None  # clinician-authored only, never generated
+    exported_at: str | None = None  # last export; also marks the note as reviewed
     created_at: str = Field(default_factory=utcnow)
 
 

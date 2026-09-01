@@ -50,4 +50,8 @@ def _migrate() -> None:
             conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN watched INTEGER NOT NULL DEFAULT 0")
         if "watch_checked_at" not in cols:
             conn.exec_driver_sql("ALTER TABLE searches ADD COLUMN watch_checked_at TEXT")
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(notes)")}
+        for col in ("tags", "reflection", "exported_at"):
+            if col not in cols:
+                conn.exec_driver_sql(f"ALTER TABLE notes ADD COLUMN {col} TEXT")
         conn.commit()
