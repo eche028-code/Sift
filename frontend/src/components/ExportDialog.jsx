@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CheckCheck, Copy, Download, Plus, X } from "lucide-react";
+import { Check, CheckCheck, Copy, Download, FolderDown, Plus, X } from "lucide-react";
 import { api } from "../api";
 import { Busy, ErrorBox } from "./bits";
 
@@ -84,10 +84,14 @@ export default function ExportDialog({ noteId, onClose, onExported }) {
     return JSON.stringify(frag, null, 1);
   }, [data, tags, reflection]);
 
-  const confirm = async () => {
+  const confirm = async (save = false) => {
     setBusy(true);
     try {
-      const r = await api.exportNote(noteId, { tags, reflection: reflection.trim() || null });
+      const r = await api.exportNote(noteId, {
+        tags,
+        reflection: reflection.trim() || null,
+        save,
+      });
       setResult(r);
       onExported?.();
       return r;
@@ -97,6 +101,10 @@ export default function ExportDialog({ noteId, onClose, onExported }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const doSave = async () => {
+    await confirm(true);
   };
 
   const doCopy = async () => {
@@ -235,13 +243,34 @@ export default function ExportDialog({ noteId, onClose, onExported }) {
           </div>
 
           <div className="px-5 pb-8 pt-2 flex flex-col gap-2 border-t border-slate-800">
-            <button
-              onClick={doDownload}
-              disabled={busy}
-              className="w-full rounded-xl bg-teal-500 text-slate-950 font-semibold py-3.5 inline-flex items-center justify-center gap-2 active:bg-teal-400 disabled:opacity-50"
-            >
-              <Download size={16} /> {busy ? "Saving…" : `Download ${data.filename}`}
-            </button>
+            {/* With a folder set the file lands there straight from the server, so
+                the phone never has to carry it; download stays for everything else. */}
+            {data.export_dir?.ok ? (
+              <button
+                onClick={doSave}
+                disabled={busy}
+                className="w-full rounded-xl bg-teal-500 text-slate-950 font-semibold py-3.5 inline-flex items-center justify-center gap-2 active:bg-teal-400 disabled:opacity-50"
+              >
+                <FolderDown size={16} /> {busy ? "Writing…" : "Save to Codex folder"}
+              </button>
+            ) : (
+              <button
+                onClick={doDownload}
+                disabled={busy}
+                className="w-full rounded-xl bg-teal-500 text-slate-950 font-semibold py-3.5 inline-flex items-center justify-center gap-2 active:bg-teal-400 disabled:opacity-50"
+              >
+                <Download size={16} /> {busy ? "Saving…" : `Download ${data.filename}`}
+              </button>
+            )}
+            {data.export_dir?.ok && (
+              <button
+                onClick={doDownload}
+                disabled={busy}
+                className="w-full rounded-xl border border-slate-700 text-slate-300 py-3 inline-flex items-center justify-center gap-2 active:bg-slate-900 disabled:opacity-50"
+              >
+                <Download size={16} /> Download instead
+              </button>
+            )}
             <button
               onClick={doCopy}
               disabled={busy}
@@ -259,11 +288,15 @@ export default function ExportDialog({ noteId, onClose, onExported }) {
                 </>
               )}
             </button>
-            {result && (
+            {result?.written_to ? (
+              <p className="font-mono text-xs text-emerald-500 text-center break-all inline-flex items-center justify-center gap-1.5">
+                <Check size={13} className="shrink-0" /> {result.written_to}
+              </p>
+            ) : result ? (
               <p className="text-xs text-emerald-500 text-center inline-flex items-center justify-center gap-1.5">
                 <Check size={13} /> Reviewed and stamped — re-exporting gives the same fragment.
               </p>
-            )}
+            ) : null}
           </div>
         </>
       ) : null}

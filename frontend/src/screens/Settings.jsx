@@ -70,6 +70,15 @@ export default function Settings({ go }) {
   };
   useEffect(() => { load(); }, []);
 
+  const [dirCheck, setDirCheck] = useState(null);
+  const checkDir = async () => {
+    setDirCheck({ detail: "Checking…" });
+    setDirCheck(await api.checkExportDir(settings.codex_export_dir || "").catch((e) => ({
+      ok: false,
+      detail: e.message,
+    })));
+  };
+
   const saveTaxonomy = async () => {
     try {
       const r = await api.putTaxonomy(taxText);
@@ -358,7 +367,48 @@ export default function Settings({ go }) {
             {/* ── codex ── */}
             <section className="flex flex-col gap-4">
               <Label>Codex</Label>
-              <p className="text-xs text-slate-600 -mt-2">
+              <div>
+                <p className="text-xs text-slate-500 mb-1.5">
+                  Export folder — Sift writes the fragment here, on this PC
+                </p>
+                <input
+                  className={`${inputCls} font-mono text-xs`}
+                  value={settings.codex_export_dir}
+                  onChange={(e) => { setDirCheck(null); set("codex_export_dir")(e); }}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="C:\Users\you\OneDrive\Codex\inbox"
+                />
+                <div className="flex items-center gap-3 mt-2">
+                  <button
+                    onClick={checkDir}
+                    className="rounded-xl border border-slate-700 text-slate-300 px-4 py-2 text-sm active:bg-slate-900"
+                  >
+                    Check folder
+                  </button>
+                  {dirCheck && (
+                    <span
+                      className={`text-xs ${
+                        dirCheck.ok === undefined
+                          ? "text-slate-500"
+                          : dirCheck.ok
+                            ? "text-emerald-400"
+                            : "text-amber-400"
+                      }`}
+                    >
+                      {dirCheck.detail}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                  Point it at a synced cloud folder and Codex reads the fragments from the other
+                  side. The folder has to exist already — Sift will not create it, because a typo
+                  would sync somewhere Codex never looks. Leave it blank to export by download and
+                  clipboard instead. Re-exporting a note overwrites its file.
+                </p>
+              </div>
+
+              <p className="text-xs text-slate-600">
                 The tag vocabulary a note is filed under when you export it. Get it from Codex with{" "}
                 <span className="font-mono text-slate-500">anchors.export_taxonomy_yaml</span> and
                 paste it here — Sift suggests from this list and never invents tags.

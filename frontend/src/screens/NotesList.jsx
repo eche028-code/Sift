@@ -6,28 +6,42 @@ import { Busy, GearButton, Header, NavMenu } from "../components/bits";
 export default function NotesList({ go }) {
   const [notes, setNotes] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [dir, setDir] = useState(null);
+  const [msg, setMsg] = useState("");
 
   const load = () => api.listNotes().then(setNotes).catch(() => setNotes([]));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.getExportDir().then(setDir).catch(() => {});
+  }, []);
 
   // Batch export covers re-seeding Codex, so it re-emits only notes that have
   // already been through the review dialog — the rest have no confirmed tags.
   const exportReviewed = async () => {
     setBusy(true);
+    setMsg("");
     try {
-      const frags = await api.noteFragments();
-      if (!frags.length) return;
-      const url = URL.createObjectURL(
-        new Blob([JSON.stringify(frags, null, 1)], { type: "application/json" })
-      );
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "sift-notes.fragment.json";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch { /* offline or nothing reviewed — the button just no-ops */ }
+      if (dir?.ok) {
+        const r = await api.saveFragments();
+        setMsg(`${r.count} note${r.count === 1 ? "" : "s"} → ${r.written_to}`);
+      } else {
+        const frags = await api.noteFragments();
+        if (frags.length) {
+          const url = URL.createObjectURL(
+            new Blob([JSON.stringify(frags, null, 1)], { type: "application/json" })
+          );
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "sift-notes.fragment.json";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+      }
+    } catch (e) {
+      setMsg(e.message);
+    }
     setBusy(false);
   };
 
@@ -77,14 +91,23 @@ export default function NotesList({ go }) {
             </div>
           ))}
           {notes.some((n) => n.exported_at) && (
-            <button
-              onClick={exportReviewed}
-              disabled={busy}
-              className="mt-1 mb-4 w-full rounded-xl border border-slate-800 text-slate-400 py-3 inline-flex items-center justify-center gap-2 active:bg-slate-900 disabled:opacity-50"
-            >
-              <Upload size={15} />
-              {busy ? "Building…" : "Export reviewed notes as one file"}
-            </button>
+            <div className="mt-1 mb-4">
+              <button
+                onClick={exportReviewed}
+                disabled={busy}
+                className="w-full rounded-xl border border-slate-800 text-slate-400 py-3 inline-flex items-center justify-center gap-2 active:bg-slate-900 disabled:opacity-50"
+              >
+                <Upload size={15} />
+                {busy
+                  ? "Building…"
+                  : dir?.ok
+                    ? "Save reviewed notes to Codex folder"
+                    : "Export reviewed notes as one file"}
+              </button>
+              {msg && (
+                <p className="font-mono text-xs text-slate-500 mt-2 text-center break-all">{msg}</p>
+              )}
+            </div>
           )}
         </div>
       )}

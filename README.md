@@ -140,13 +140,21 @@ Design points, so expectations are right:
 ## Export to Codex
 
 A note can be filed into Codex as a `fragment.json` (spec v1). Open a note → **Export
-to Codex** → confirm its tags, optionally write a reflection → take the fragment as a
-file or on the clipboard, then on the Codex machine:
+to Codex** → confirm its tags, optionally write a reflection → save it. Then on the
+Codex machine:
 
 ```bash
 codex import sift-note-42.fragment.json
 ```
 
+- **Set an export folder** in **Settings → Codex** — a full path on this PC, typically
+  a synced cloud folder (`C:\Users\you\OneDrive\Codex\inbox`). Sift writes the fragment
+  there itself, so exporting from the phone needs no file handling at that end: the PC
+  writes, the cloud syncs, Codex reads. **Check folder** confirms the path exists and is
+  writable before you rely on it. The folder must already exist — Sift will not create
+  one, because a typo would sync fragments somewhere Codex never looks. Re-exporting a
+  note overwrites its file, which is the point: the same note always produces the same
+  fragment. Leave the setting blank and export falls back to download and clipboard.
 - **Tags come from Codex's own vocabulary.** Export it there with
   `anchors.export_taxonomy_yaml` and paste it into **Settings → Codex**; it is stored at
   `data/codex_taxonomy.yaml`. Sift suggests tags by plain word matching against that
@@ -159,9 +167,9 @@ codex import sift-note-42.fragment.json
   note, so exporting it again produces the same fragment.
 - `created_at` is the note's synthesis date, not the export date — it dates the
   snapshot of the evidence.
-- The Library's **Export reviewed notes as one file** button emits a JSON array of every
-  note that has been through the dialog. Notes that never were are left out: their tags
-  would be Sift's guesses rather than yours.
+- The Library's batch button writes every note that has been through the dialog as one
+  `sift-notes.fragment.json` array. Notes that never were are left out: their tags would
+  be Sift's guesses rather than yours.
 
 Notes synthesised from now on open with a `# Q:` line carrying the question, which the
 fragment needs; older notes get that line added at export.

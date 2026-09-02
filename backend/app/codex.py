@@ -19,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from . import settings_store as st
 from .db import DATA_DIR
 from .models import Note, utcnow
 
@@ -165,6 +166,66 @@ def _iso_tz(ts: str | None) -> str:
 
 def filename(note_id: int) -> str:
     return f"sift-note-{note_id}.fragment.json"
+
+
+BATCH_FILENAME = "sift-notes.fragment.json"
+
+
+def export_dir() -> Path | None:
+    """The folder fragments are written to, or None when none is configured."""
+    raw = st.get("codex_export_dir").strip()
+    return Path(raw) if raw else None
+
+
+def check_dir(raw: str, probe: bool = False) -> dict:
+    """Report whether a path can take a fragment, in words worth showing the reader.
+
+    `probe` actually writes and removes a file — the only honest test for a
+    cloud-synced folder, so it is reserved for the explicit Check button rather
+    than run on every dialog open.
+    """
+    path = (raw or "").strip()
+    if not path:
+        return {"ok": False, "detail": "No folder set — export falls back to download and clipboard."}
+    p = Path(path)
+    if not p.is_absolute():
+        return {"ok": False, "detail": "Give the full path, not a relative one."}
+    if not p.exists():
+        # Creating it would quietly succeed on a typo and sync fragments somewhere
+        # Codex never looks; better to say so and let the reader fix the path.
+        return {"ok": False, "detail": "Folder not found. Sift will not create it — check the path."}
+    if not p.is_dir():
+        return {"ok": False, "detail": "That path is a file, not a folder."}
+    if probe:
+        test = p / ".sift-write-test"
+        try:
+            test.write_text("", encoding="utf-8")
+            test.unlink()
+        except OSError as e:
+            return {"ok": False, "detail": f"Folder is not writable: {e}"}
+    return {"ok": True, "detail": f"Ready — fragments are written to {p}"}
+
+
+def write_fragment(name: str, payload) -> str:
+    """Drop a fragment (or a batch array) into the export folder; returns the path.
+
+    Overwrites by design: a fragment is a handoff, not an archive, and exporting
+    the same note twice is meant to produce the same file.
+    """
+    if "/" in name or "\\" in name or name in (".", ".."):
+        raise ValueError(f"refusing to write {name!r}")
+    directory = export_dir()
+    if directory is None:
+        raise ValueError("no export folder is configured")
+    status = check_dir(str(directory))
+    if not status["ok"]:
+        raise ValueError(status["detail"])
+    target = directory / name
+    try:
+        target.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"could not write {target}: {e}") from e
+    return str(target)
 
 
 def fragment(note: Note, question: str | None) -> dict:

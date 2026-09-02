@@ -12,6 +12,23 @@ class TaxonomyIn(BaseModel):
     yaml_text: str
 
 
+class DirIn(BaseModel):
+    path: str
+
+
+@router.get("/export-dir")
+def get_export_dir() -> dict:
+    configured = codex.export_dir()
+    path = str(configured) if configured else ""
+    return {"path": path, **codex.check_dir(path)}
+
+
+@router.post("/export-dir/check")
+def check_export_dir(body: DirIn) -> dict:
+    """Check a path the reader has typed but not saved yet — writes a probe file."""
+    return {"path": body.path.strip(), **codex.check_dir(body.path, probe=True)}
+
+
 @router.get("/taxonomy")
 def get_taxonomy() -> dict:
     tags = codex.load_taxonomy()

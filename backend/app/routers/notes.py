@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/notes", tags=["notes"])
 class ExportIn(BaseModel):
     tags: list[str] = []
     reflection: str | None = None
+    save: bool = False  # also write the file into the configured export folder
 
 
 def note_out(note: Note, raw_query: str | None) -> dict:
@@ -53,9 +54,8 @@ def list_notes() -> list[dict]:
         return [note_out(n, rq) for n, rq in rows]
 
 
-@router.get("/fragments")
-def list_fragments(ids: str | None = Query(default=None)) -> list[dict]:
-    """Batch export — a JSON array of the same objects, which `codex import` accepts.
+def _fragments(ids: str | None) -> list[dict]:
+    """Fragments for a batch export.
 
     Without `ids` this is every note that has been through the review dialog.
     Notes that never were are left out on purpose: their tags would be Sift's
@@ -82,6 +82,25 @@ def list_fragments(ids: str | None = Query(default=None)) -> list[dict]:
     return out
 
 
+@router.get("/fragments")
+def list_fragments(ids: str | None = Query(default=None)) -> list[dict]:
+    """A JSON array of the same objects, which `codex import` accepts."""
+    return _fragments(ids)
+
+
+@router.post("/fragments/save")
+def save_fragments(ids: str | None = Query(default=None)) -> dict:
+    """Write the batch straight into the export folder."""
+    frags = _fragments(ids)
+    if not frags:
+        raise HTTPException(400, "no reviewed notes to export yet")
+    try:
+        written_to = codex.write_fragment(codex.BATCH_FILENAME, frags)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"written_to": written_to, "count": len(frags)}
+
+
 @router.get("/{note_id}")
 def get_note(note_id: int) -> dict:
     with session() as s:
@@ -96,6 +115,7 @@ def export_review(note_id: int) -> dict:
         note, question, _raw = _note_and_question(s, note_id)
         taxonomy = codex.load_taxonomy()
         suggested = codex.suggest_tags(f"{question or ''}\n{note.body_md}", taxonomy)
+        configured = codex.export_dir()
         return {
             "filename": codex.filename(note.id),
             "fragment": codex.fragment(note, question),  # preview, saved tags applied
@@ -105,6 +125,10 @@ def export_review(note_id: int) -> dict:
             "suggested_tags": suggested,
             "taxonomy": taxonomy,
             "taxonomy_loaded": bool(taxonomy),
+            "export_dir": {
+                "path": str(configured) if configured else "",
+                **codex.check_dir(str(configured) if configured else ""),
+            },
         }
 
 
@@ -122,7 +146,17 @@ def export_note(note_id: int, body: ExportIn) -> dict:
         s.add(note)
         s.commit()
         s.refresh(note)
-        return {"filename": codex.filename(note.id), "fragment": codex.fragment(note, question)}
+        name = codex.filename(note.id)
+        frag = codex.fragment(note, question)
+    written_to = None
+    if body.save:
+        try:
+            written_to = codex.write_fragment(name, frag)
+        except ValueError as e:
+            # The review is already saved, so surface the folder problem rather than
+            # failing the whole export — download and clipboard still work.
+            raise HTTPException(400, str(e))
+    return {"filename": name, "fragment": frag, "written_to": written_to}
 
 
 @router.delete("/{note_id}")

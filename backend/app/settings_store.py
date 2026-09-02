@@ -18,6 +18,9 @@ DEFAULTS: dict[str, str] = {
     "llm_base_url": "",
     "llm_api_key": "",
     "llm_model": "",
+    # Where "Export to Codex" drops the fragment. Blank falls back to download
+    # and clipboard; point it at a synced cloud folder and Codex picks it up there.
+    "codex_export_dir": "",
     # Per-function steering. Blank means "use the built-in instructions".
     "prompt_translator": "",
     "prompt_clarifier": "",
